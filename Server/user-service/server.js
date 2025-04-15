@@ -17,15 +17,22 @@ app.use(morgan("dev"));
 // Database connection
 connectDB();
 
+// Update CORS middleware
+app.use(cors());
+
 // Routes
 app.use("/api/users", userRoutes);
+
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "OK", timestamp: new Date() });
+});
 
 // Error handling middleware
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`User service running on port ${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Server running on port 3000");
 });
 
 module.exports = app;
