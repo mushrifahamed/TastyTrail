@@ -1,7 +1,8 @@
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const authService = require("../services/authService");
-const notificationService = require("../services/notificationService");
+const { sendEmail } = require("../services/emailService");
 const passwordUtils = require("../utils/passwordUtils");
 const { JWT_SECRET, JWT_EXPIRES_IN } = process.env;
 
@@ -57,6 +58,7 @@ const requestRestaurantAdminAccess = async (req, res, next) => {
       role: "restaurant_admin",
       isActive: false,
       status: "pending",
+      phoneVerified: true, // Automatically verify phone without OTP
       restaurantDetails: {
         name: restaurantName,
         licenseNumber,
@@ -64,11 +66,18 @@ const requestRestaurantAdminAccess = async (req, res, next) => {
       },
     });
 
-    // Notify super admin about new request
-    await notificationService.sendAdminNotification(
-      "New restaurant admin request",
-      `New restaurant admin request from ${restaurantName}`
-    );
+    if (email) {
+      await sendEmail(
+        restaurantAdmin.email,
+        "New restaurant admin request",
+        `New restaurant admin request from ${restaurantName}`
+      );
+    }
+    // // Notify super admin about new request
+    // await notificationService.sendAdminNotification(
+    //   "New restaurant admin request",
+    //   `New restaurant admin request from ${restaurantName}`
+    // );
 
     res.status(201).json({
       status: "success",
@@ -103,12 +112,19 @@ const approveRestaurantAdmin = async (req, res, next) => {
       { new: true }
     );
 
+    if (email) {
+      await sendEmail(
+        user._id,
+        user.email,
+        "Your restaurant admin account has been approved"
+      );
+    }
     // Send welcome email with temporary password
-    await notificationService.sendWelcomeNotification(
-      user._id,
-      user.email,
-      "Your restaurant admin account has been approved"
-    );
+    // await notificationService.sendWelcomeNotification(
+    //   user._id,
+    //   user.email,
+    //   "Your restaurant admin account has been approved"
+    // );
 
     res.status(200).json({
       status: "success",
@@ -139,13 +155,20 @@ const registerCustomer = async (req, res, next) => {
       role: "customer",
       address,
       isActive: true,
+      phoneVerified: true,
     });
 
-    // Generate verification token
+    // Generate JWT token
     const token = authService.generateToken(customer._id, customer.role);
 
-    // Send verification email
-    await notificationService.sendVerificationEmail(customer.email, token);
+    // Send welcome email (no OTP)
+    if (email) {
+      await sendEmail(
+        customer.email,
+        "Welcome to TastyTrail!",
+        `Hello ${customer.name},\n\nThank you for registering at TastyTrail!`
+      );
+    }
 
     res.status(201).json({
       status: "success",
@@ -187,13 +210,14 @@ const registerDeliveryPerson = async (req, res, next) => {
       documents,
       status: "pending",
       isActive: false,
+      phoneVerified: true, // Automatically verify phone without OTP
     });
 
-    // Notify admin about new delivery person registration
-    await notificationService.sendAdminNotification(
-      "New delivery person registration",
-      `New delivery person ${name} registered and pending approval`
-    );
+    // // Notify admin about new delivery person registration
+    // await notificationService.sendAdminNotification(
+    //   "New delivery person registration",
+    //   `New delivery person ${name} registered and pending approval`
+    // );
 
     res.status(201).json({
       status: "success",
@@ -227,11 +251,11 @@ const approveDeliveryPerson = async (req, res, next) => {
       { new: true }
     );
 
-    // Send approval notification with temporary password
-    await notificationService.sendSMSNotification(
-      deliveryPerson.phone,
-      `Your delivery account has been approved. Temporary password: ${tempPassword}`
-    );
+    // // Send approval notification with temporary password
+    // await notificationService.sendSMSNotification(
+    //   deliveryPerson.phone,
+    //   `Your delivery account has been approved. Temporary password: ${tempPassword}`
+    // );
 
     res.status(200).json({
       status: "success",
@@ -369,13 +393,14 @@ const getUser = async (req, res, next) => {
 // Get current user profile
 const getMe = async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.user.id)) {
+      return res.status(400).json({ message: "Invalid user ID format" });
+    }
+
     const user = await User.findById(req.user.id);
-    res.status(200).json({
-      status: "success",
-      data: {
-        user,
-      },
-    });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    res.status(200).json({ status: "success", data: { user } });
   } catch (error) {
     next(error);
   }

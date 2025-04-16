@@ -13,7 +13,7 @@ def merge_js_files(source_folder, output_file):
                 dirs.remove('.next')  # Don't traverse into .next
                 
             # Filter JavaScript and JSX files
-            js_files = [f for f in files if f.endswith(('.dart'))]
+            js_files = [f for f in files if f.endswith(('.jsx', '.js'))]
             
             # Sort files to ensure consistent order
             js_files.sort()
@@ -33,6 +33,6 @@ def merge_js_files(source_folder, output_file):
                     outfile.write('\n')
 
 # Example usage
-source_folder = "./client_customer/lib"  # Replace with your source folder if needed
+source_folder = "./client_web"  # Replace with your source folder if needed
 output_file = "merged front.txt"  # Replace with your desired output file if needed
 merge_js_files(source_folder, output_file)

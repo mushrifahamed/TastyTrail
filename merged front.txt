@@ -1,987 +1,1551 @@
 
-/* File: ./client_customer/lib\main.dart */
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'providers/auth_provider.dart';
-import 'services/auth_service.dart';
-import 'models/user.dart';
-import 'screens/auth/login_screen.dart';
-import 'screens/home/home_screen.dart';
-import 'screens/auth/register_screen.dart';
+/* File: ./client_web\eslint.config.js */
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize SharedPreferences
-  final prefs = await SharedPreferences.getInstance();
-  final authService = AuthService();
-
-  // Check if user is already logged in
-  final token = await authService.getToken();
-  final userJson = await authService.getUser();
-  User? initialUser;
-
-  if (userJson != null) {
-    initialUser = User.fromJson(userJson);
-  }
-
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(
-          create:
-              (_) =>
-                  AuthProvider()
-                    ..setToken(token ?? '')
-                    ..setUser(
-                      initialUser ??
-                          User(id: '', name: '', email: '', role: ''),
-                    ),
-        ),
+export default [
+  { ignores: ['dist'] },
+  {
+    files: ['**/*.{js,jsx}'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        ecmaFeatures: { jsx: true },
+        sourceType: 'module',
+      },
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+      ...reactHooks.configs.recommended.rules,
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      'react-refresh/only-export-components': [
+        'warn',
+        { allowConstantExport: true },
       ],
-      child: const MyApp(),
-    ),
+    },
+  },
+]
+
+
+/* File: ./client_web\vite.config.js */
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: {
+    port: 5199,
+  },
+});
+
+
+/* File: ./client_web\src\App.jsx */
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "./context/AuthContext";
+import Layout from "./components/Layout";
+import Login from "./pages/Auth/Login";
+import RestaurantAdminRequest from "./pages/Auth/RestaurantAdminRequest";
+import AdminDashboard from "./pages/admin/Dashboard";
+import AdminUsers from "./pages/admin/Users";
+import AdminRestaurantAdmins from "./pages/admin/RestaurantAdmins";
+import AdminDeliveryPersonnel from "./pages/admin/DeliveryPersonnel";
+import RestaurantAdminDashboard from "./pages/restaurant-admin/Dashboard";
+import RestaurantAdminProfile from "./pages/restaurant-admin/Profile";
+import NotFound from "./pages/NotFound";
+import ProtectedRoute from "./components/ProtectedRoute";
+
+function App() {
+  return (
+    <Router>
+      <AuthProvider>
+        <Routes>
+          {/* Public routes */}
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/restaurant-admin/request"
+            element={<RestaurantAdminRequest />}
+          />
+
+          {/* Admin routes */}
+          <Route
+            path="/admin"
+            element={<ProtectedRoute allowedRoles={["admin"]} />}
+          >
+            <Route element={<Layout role="admin" />}>
+              <Route index element={<AdminDashboard />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route
+                path="restaurant-admins"
+                element={<AdminRestaurantAdmins />}
+              />
+              <Route
+                path="delivery-personnel"
+                element={<AdminDeliveryPersonnel />}
+              />
+            </Route>
+          </Route>
+
+          {/* Restaurant admin routes */}
+          <Route
+            path="/restaurant-admin"
+            element={<ProtectedRoute allowedRoles={["restaurant_admin"]} />}
+          >
+            <Route element={<Layout role="restaurant_admin" />}>
+              <Route index element={<RestaurantAdminDashboard />} />
+              <Route path="profile" element={<RestaurantAdminProfile />} />
+            </Route>
+          </Route>
+
+          {/* 404 */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </AuthProvider>
+    </Router>
   );
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+export default App;
 
-  @override
-  Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
 
-    return MaterialApp(
-      title: 'Food Delivery App',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
-      home: authProvider.isAuth ? const HomeScreen() : const LoginScreen(),
-      routes: {
-        '/login': (context) => const LoginScreen(),
-        '/register': (context) => const RegisterScreen(),
-        '/home': (context) => const HomeScreen(),
-      },
-    );
+/* File: ./client_web\src\main.jsx */
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+
+/* File: ./client_web\src\components\Layout.jsx */
+import Sidebar from "./layout/Sidebar";
+
+const Layout = ({ children, role }) => {
+  return (
+    <div className="flex">
+      <Sidebar role={role} />
+      <div className="flex-1 ml-64 p-6">{children}</div>
+    </div>
+  );
+};
+
+export default Layout;
+
+
+/* File: ./client_web\src\components\ProtectedRoute.jsx */
+import { useContext } from "react";
+import { Navigate, Outlet } from "react-router-dom";
+import { AuthContext } from "../context/AuthContext";
+
+const ProtectedRoute = ({ allowedRoles }) => {
+  const { user, loading } = useContext(AuthContext);
+
+  console.log("ProtectedRoute user:", user);
+
+  if (loading) {
+    return <div>Loading...</div>;
   }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!allowedRoles.includes(user.role)) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <Outlet />;
+};
+
+export default ProtectedRoute;
+
+
+/* File: ./client_web\src\components\layout\Sidebar.jsx */
+import { Link, useLocation } from "react-router-dom";
+import { AuthContext } from "../../context/AuthContext";
+import { useContext } from "react";
+import {
+  MdDashboard,
+  MdPeople,
+  MdRestaurant,
+  MdDeliveryDining,
+  MdLogout,
+  MdPerson,
+} from "react-icons/md";
+
+const adminLinks = [
+  { name: "Dashboard", path: "/admin", icon: <MdDashboard /> },
+  { name: "Users", path: "/admin/users", icon: <MdPeople /> },
+  {
+    name: "Restaurant Admins",
+    path: "/admin/restaurant-admins",
+    icon: <MdRestaurant />,
+  },
+  {
+    name: "Delivery Personnel",
+    path: "/admin/delivery-personnel",
+    icon: <MdDeliveryDining />,
+  },
+];
+
+const restaurantAdminLinks = [
+  { name: "Dashboard", path: "/restaurant-admin", icon: <MdDashboard /> },
+  { name: "Profile", path: "/restaurant-admin/profile", icon: <MdPerson /> },
+];
+
+const Sidebar = ({ role }) => {
+  const location = useLocation();
+  const { logout } = useContext(AuthContext);
+
+  const links = role === "admin" ? adminLinks : restaurantAdminLinks;
+
+  return (
+    <div className="w-64 bg-gray-800 text-white h-screen fixed">
+      <div className="p-4 border-b border-gray-700">
+        <h1 className="text-xl font-bold">
+          {role === "admin" ? "Admin Panel" : "Restaurant Admin"}
+        </h1>
+      </div>
+
+      <nav className="p-4">
+        <ul className="space-y-2">
+          {links.map((link) => (
+            <li key={link.path}>
+              <Link
+                to={link.path}
+                className={`flex items-center p-2 rounded-lg hover:bg-gray-700 ${
+                  location.pathname === link.path ? "bg-gray-700" : ""
+                }`}
+              >
+                <span className="material-icons mr-3">{link.icon}</span>
+                {link.name}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
+
+      <div className="absolute bottom-0 w-full p-4">
+        <button
+          onClick={logout}
+          className="w-full flex items-center justify-center p-2 rounded-lg bg-red-600 hover:bg-red-700"
+        >
+          <span className="material-icons mr-2">logout</span>
+          Logout
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default Sidebar;
+
+
+/* File: ./client_web\src\components\ui\toaster.jsx */
+function _optionalChain(ops) {
+  let lastAccessLHS = undefined
+  let value = ops[0]
+  let i = 1
+  while (i < ops.length) {
+    const op = ops[i]
+    const fn = ops[i + 1]
+    i += 2
+    if ((op === 'optionalAccess' || op === 'optionalCall') && value == null) {
+      return undefined
+    }
+    if (op === 'access' || op === 'optionalAccess') {
+      lastAccessLHS = value
+      value = fn(value)
+    } else if (op === 'call' || op === 'optionalCall') {
+      value = fn((...args) => value.call(lastAccessLHS, ...args))
+      lastAccessLHS = undefined
+    }
+  }
+  return value
+}
+;('use client')
+
+import {
+  Toaster as ChakraToaster,
+  Portal,
+  Spinner,
+  Stack,
+  Toast,
+  createToaster,
+} from '@chakra-ui/react'
+
+export const toaster = createToaster({
+  placement: 'bottom-end',
+  pauseOnPageIdle: true,
+})
+
+export const Toaster = () => {
+  return (
+    <Portal>
+      <ChakraToaster toaster={toaster} insetInline={{ mdDown: '4' }}>
+        {(toast) => (
+          <Toast.Root width={{ md: 'sm' }}>
+            {toast.type === 'loading' ? (
+              <Spinner size='sm' color='blue.solid' />
+            ) : (
+              <Toast.Indicator />
+            )}
+            <Stack gap='1' flex='1' maxWidth='100%'>
+              {toast.title && <Toast.Title>{toast.title}</Toast.Title>}
+              {toast.description && (
+                <Toast.Description>{toast.description}</Toast.Description>
+              )}
+            </Stack>
+            {toast.action && (
+              <Toast.ActionTrigger>{toast.action.label}</Toast.ActionTrigger>
+            )}
+            {_optionalChain([
+              toast,
+              'access',
+              (_) => _.meta,
+              'optionalAccess',
+              (_2) => _2.closable,
+            ]) && <Toast.CloseTrigger />}
+          </Toast.Root>
+        )}
+      </ChakraToaster>
+    </Portal>
+  )
 }
 
 
-/* File: ./client_customer/lib\models\user.dart */
-class User {
-  final String id;
-  final String name;
-  final String email;
-  final String role;
-  final String? phone;
-  final String? address;
+/* File: ./client_web\src\context\AuthContext.jsx */
+import { createContext, useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import api from "../utils/api";
 
-  User({
-    required this.id,
-    required this.name,
-    required this.email,
-    required this.role,
-    this.phone,
-    this.address,
+export const AuthContext = createContext();
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        console.log("Auth provider Token:", token);
+        if (token) {
+          const response = await api.get("/api/users/me");
+          console.log("Auth check response:", response);
+          if (response.status === 401 || response.status === 404) {
+            logout();
+          }
+          setUser(response.data.data.user);
+        }
+      } catch (error) {
+        console.error("Auth check failed:", error);
+        console.log("Error response:", error.response);
+        if (error.response?.status === 401 || error.response?.status === 404) {
+          logout();
+        }
+        logout();
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  const login = async (credentials) => {
+    try {
+      const response = await api.post("/api/users/login", credentials);
+
+      // Check for error in response body
+      if (response.data.error) {
+        throw new Error(response.data.error);
+        console.log("Login error:", response.data.error);
+      }
+
+      localStorage.setItem("token", response.data.token);
+      setUser(response.data.data.user);
+      return { ...response.data, user: response.data.data.user };
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem("token");
+    setUser(null);
+    navigate("/login");
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, login, logout, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+
+/* File: ./client_web\src\pages\NotFound.jsx */
+import { Link } from "react-router-dom";
+
+const NotFound = () => {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100">
+      <div className="text-center">
+        <h1 className="text-6xl font-bold text-gray-800 mb-4">404</h1>
+        <h2 className="text-2xl font-semibold text-gray-700 mb-6">
+          Page Not Found
+        </h2>
+        <p className="text-gray-600 mb-8">
+          The page you are looking for doesn't exist or has been moved.
+        </p>
+        <Link
+          to="/"
+          className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition duration-300"
+        >
+          Go Back Home
+        </Link>
+      </div>
+    </div>
+  );
+};
+
+export default NotFound;
+
+
+/* File: ./client_web\src\pages\admin\Dashboard.jsx */
+import { useContext, useEffect, useState } from "react";
+import api from "../../utils/api";
+import { AuthContext } from "../../context/AuthContext";
+
+const AdminDashboard = () => {
+  const { user } = useContext(AuthContext);
+  const [stats, setStats] = useState({
+    users: 0,
+    restaurantAdmins: 0,
+    deliveryPersonnel: 0,
+    pendingRequests: 0,
   });
 
-  factory User.fromJson(Map<String, dynamic> json) {
-    return User(
-      id: json['_id'],
-      name: json['name'],
-      email: json['email'],
-      role: json['role'],
-      phone: json['phone'],
-      address: json['address'],
-    );
-  }
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const [usersRes, restaurantAdminsRes, deliveryRes, pendingRes] =
+          await Promise.all([
+            api.get("/api/users?role=customer"),
+            api.get("/api/users?role=restaurant_admin"),
+            api.get("/api/users?role=delivery_personnel"),
+            api.get("/api/users?status=pending"),
+          ]);
 
-  Map<String, dynamic> toJson() {
-    return {
-      '_id': id,
-      'name': name,
-      'email': email,
-      'role': role,
-      'phone': phone,
-      'address': address,
-    };
-  }
-}
-
-
-/* File: ./client_customer/lib\providers\auth_provider.dart */
-import 'package:flutter/foundation.dart';
-import '../models/user.dart';
-
-class AuthProvider with ChangeNotifier {
-  User? _user;
-  String? _token;
-
-  User? get user => _user;
-  String? get token => _token;
-  bool get isAuth => _token != null;
-
-  void setUser(User user) {
-    _user = user;
-    notifyListeners();
-  }
-
-  void setToken(String token) {
-    _token = token;
-    notifyListeners();
-  }
-
-  Future<void> logout() async {
-    _user = null;
-    _token = null;
-    notifyListeners();
-  }
-}
-
-
-/* File: ./client_customer/lib\screens\auth\login_screen.dart */
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
-import '../../services/auth_service.dart';
-import '../../providers/auth_provider.dart';
-import '../home/home_screen.dart';
-import 'register_screen.dart';
-import '../../models/user.dart';
-
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
-
-  @override
-  _LoginScreenState createState() => _LoginScreenState();
-}
-
-class _LoginScreenState extends State<LoginScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _isLoading = false;
-  String? _errorMessage;
-
-  Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    final apiService = ApiService();
-    final authService = AuthService();
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-
-    final result = await apiService.login(
-      email: _emailController.text.trim(),
-      password: _passwordController.text.trim(),
-    );
-
-    if (result['success'] == true) {
-      final user = User.fromJson(result['user']);
-      await authService.saveAuthData(
-        result['token'],
-        jsonEncode(user.toJson()),
-      );
-      authProvider.setUser(user);
-      authProvider.setToken(result['token']);
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-      );
-    } else {
-      setState(() {
-        _errorMessage = result['message'];
-        _isLoading = false;
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Login'), centerTitle: true),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 20),
-              TextFormField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: Icon(Icons.email),
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.emailAddress,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your email';
-                  }
-                  if (!RegExp(
-                    r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
-                  ).hasMatch(value)) {
-                    return 'Please enter a valid email';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: Icon(Icons.lock),
-                  border: OutlineInputBorder(),
-                ),
-                obscureText: true,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your password';
-                  }
-                  if (value.length < 6) {
-                    return 'Password must be at least 6 characters';
-                  }
-                  return null;
-                },
-              ),
-              if (_errorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 16.0),
-                  child: Text(
-                    _errorMessage!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _isLoading ? null : _login,
-                child:
-                    _isLoading
-                        ? const CircularProgressIndicator()
-                        : const Text('Login'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const RegisterScreen(),
-                    ),
-                  );
-                },
-                child: const Text('Don\'t have an account? Register here'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-
-/* File: ./client_customer/lib\screens\auth\register_screen.dart */
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
-import '../../services/auth_service.dart';
-import '../../providers/auth_provider.dart';
-import '../home/home_screen.dart';
-import '../../models/user.dart';
-
-class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({Key? key}) : super(key: key);
-
-  @override
-  _RegisterScreenState createState() => _RegisterScreenState();
-}
-
-class _RegisterScreenState extends State<RegisterScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _phoneController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _addressController = TextEditingController();
-  bool _isLoading = false;
-  String? _errorMessage;
-
-  Future<void> _register() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    final apiService = ApiService();
-    final authService = AuthService();
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-
-    final result = await apiService.register(
-      name: _nameController.text.trim(),
-      email: _emailController.text.trim(),
-      phone: _phoneController.text.trim(),
-      password: _passwordController.text.trim(),
-      address: _addressController.text.trim(),
-    );
-
-    if (result['success'] == true) {
-      final user = User.fromJson(result['user']);
-      await authService.saveAuthData(
-        result['token'],
-        jsonEncode(user.toJson()),
-      );
-      authProvider.setUser(user);
-      authProvider.setToken(result['token']);
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-      );
-    } else {
-      setState(() {
-        _errorMessage = result['message'];
-        _isLoading = false;
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _phoneController.dispose();
-    _passwordController.dispose();
-    _addressController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Register'), centerTitle: true),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 20),
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Full Name',
-                  prefixIcon: Icon(Icons.person),
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your name';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: Icon(Icons.email),
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.emailAddress,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your email';
-                  }
-                  if (!RegExp(
-                    r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
-                  ).hasMatch(value)) {
-                    return 'Please enter a valid email';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _phoneController,
-                decoration: const InputDecoration(
-                  labelText: 'Phone Number',
-                  prefixIcon: Icon(Icons.phone),
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.phone,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your phone number';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: Icon(Icons.lock),
-                  border: OutlineInputBorder(),
-                ),
-                obscureText: true,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter a password';
-                  }
-                  if (value.length < 6) {
-                    return 'Password must be at least 6 characters';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _addressController,
-                decoration: const InputDecoration(
-                  labelText: 'Address',
-                  prefixIcon: Icon(Icons.home),
-                  border: OutlineInputBorder(),
-                ),
-                maxLines: 2,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your address';
-                  }
-                  return null;
-                },
-              ),
-              if (_errorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 16.0),
-                  child: Text(
-                    _errorMessage!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _isLoading ? null : _register,
-                child:
-                    _isLoading
-                        ? const CircularProgressIndicator()
-                        : const Text('Register'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                },
-                child: const Text('Already have an account? Login here'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-
-/* File: ./client_customer/lib\screens\home\home_screen.dart */
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../providers/auth_provider.dart';
-import '../../services/auth_service.dart';
-import '../auth/login_screen.dart';
-import '../../models/user.dart';
-
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
-
-  @override
-  _HomeScreenState createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-  int _currentIndex = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
-    final user = authProvider.user;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Food Delivery'),
-        actions: [
-          if (user != null)
-            IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: () async {
-                final authService = AuthService();
-                await authService.clearAuthData();
-                authProvider.logout();
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
-                );
-              },
-            ),
-        ],
-      ),
-      body: _buildBody(context, user),
-      bottomNavigationBar: user != null ? _buildBottomNavBar() : null,
-    );
-  }
-
-  Widget _buildBody(BuildContext context, User? user) {
-    if (user == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text('You are not logged in'),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
-                );
-              },
-              child: const Text('Login'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    switch (_currentIndex) {
-      case 0:
-        return _buildHomeContent(user);
-      case 1:
-        return _buildProfileContent(user);
-      default:
-        return _buildHomeContent(user);
-    }
-  }
-
-  Widget _buildHomeContent(User user) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Welcome, ${user.name}!',
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          const Text('Your role:', style: TextStyle(fontSize: 18)),
-          Chip(
-            label: Text(
-              user.role.toUpperCase(),
-              style: const TextStyle(color: Colors.white),
-            ),
-            backgroundColor: _getRoleColor(user.role),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Featured Restaurants',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          _buildRestaurantList(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileContent(User user) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Your Profile',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 24),
-          ListTile(
-            leading: const Icon(Icons.person),
-            title: const Text('Name'),
-            subtitle: Text(user.name),
-          ),
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.email),
-            title: const Text('Email'),
-            subtitle: Text(user.email),
-          ),
-          const Divider(),
-          if (user.phone != null)
-            ListTile(
-              leading: const Icon(Icons.phone),
-              title: const Text('Phone'),
-              subtitle: Text(user.phone!),
-            ),
-          if (user.phone != null) const Divider(),
-          if (user.address != null)
-            ListTile(
-              leading: const Icon(Icons.home),
-              title: const Text('Address'),
-              subtitle: Text(user.address!),
-            ),
-          if (user.address != null) const Divider(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRestaurantList() {
-    // This would be replaced with actual restaurant data from your API
-    final dummyRestaurants = [
-      {'name': 'Burger Palace', 'cuisine': 'American', 'rating': 4.5},
-      {'name': 'Pizza Heaven', 'cuisine': 'Italian', 'rating': 4.2},
-      {'name': 'Sushi World', 'cuisine': 'Japanese', 'rating': 4.7},
-      {'name': 'Taco Fiesta', 'cuisine': 'Mexican', 'rating': 4.3},
-      {'name': 'Curry House', 'cuisine': 'Indian', 'rating': 4.6},
-    ];
-
-    return Column(
-      children:
-          dummyRestaurants.map((restaurant) {
-            return Card(
-              margin: const EdgeInsets.only(bottom: 16),
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                leading: const Icon(Icons.restaurant, size: 40),
-                title: Text(
-                  restaurant['name'] as String,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Text(restaurant['cuisine'] as String),
-                trailing: Chip(
-                  label: Text(restaurant['rating'].toString()),
-                  backgroundColor: Colors.amber[100],
-                ),
-                onTap: () {
-                  // Would navigate to restaurant details
-                },
-              ),
-            );
-          }).toList(),
-    );
-  }
-
-  BottomNavigationBar _buildBottomNavBar() {
-    return BottomNavigationBar(
-      currentIndex: _currentIndex,
-      onTap: (index) {
-        setState(() {
-          _currentIndex = index;
+        setStats({
+          users: usersRes.data.results,
+          restaurantAdmins: restaurantAdminsRes.data.results,
+          deliveryPersonnel: deliveryRes.data.results,
+          pendingRequests: pendingRes.data.results,
         });
-      },
-      items: const [
-        BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-        BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-      ],
+      } catch (error) {
+        console.error("Failed to fetch stats:", error);
+      }
+    };
+
+    fetchStats();
+  }, []);
+
+  return (
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-6">Admin Dashboard</h1>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold">Total Users</h3>
+          <p className="text-3xl font-bold">{stats.users}</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold">Restaurant Admins</h3>
+          <p className="text-3xl font-bold">{stats.restaurantAdmins}</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold">Delivery Personnel</h3>
+          <p className="text-3xl font-bold">{stats.deliveryPersonnel}</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold">Pending Requests</h3>
+          <p className="text-3xl font-bold">{stats.pendingRequests}</p>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg shadow">
+        <h2 className="text-xl font-semibold mb-4">Recent Activities</h2>
+        {/* Recent activities list would go here */}
+      </div>
+    </div>
+  );
+};
+
+export default AdminDashboard;
+
+
+/* File: ./client_web\src\pages\admin\DeliveryPersonnel.jsx */
+import { useContext, useEffect, useState } from "react";
+import api from "../../utils/api";
+import { AuthContext } from "../../context/AuthContext";
+
+const AdminDeliveryPersonnel = () => {
+  const { user } = useContext(AuthContext);
+  const [deliveryPersons, setDeliveryPersons] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchDeliveryPersons = async () => {
+      try {
+        const response = await api.get("/api/users?role=delivery_personnel");
+        setDeliveryPersons(response.data.users);
+      } catch (err) {
+        setError(
+          err.response?.data?.message || "Failed to fetch delivery personnel"
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDeliveryPersons();
+  }, []);
+
+  const approveDeliveryPerson = async (userId) => {
+    try {
+      await api.patch("/api/users/delivery/approve", { userId });
+      setDeliveryPersons(
+        deliveryPersons.map((person) =>
+          person._id === userId
+            ? { ...person, isActive: true, status: "approved" }
+            : person
+        )
+      );
+    } catch (err) {
+      setError(
+        err.response?.data?.message || "Failed to approve delivery person"
+      );
+    }
+  };
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div className="text-red-500">{error}</div>;
+
+  return (
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-6">Delivery Personnel Management</h1>
+
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Name
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Phone
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Vehicle
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {deliveryPersons.map((person) => (
+              <tr key={person._id}>
+                <td className="px-6 py-4 whitespace-nowrap">{person.name}</td>
+                <td className="px-6 py-4 whitespace-nowrap">{person.phone}</td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  {person.vehicleInfo?.type} ({person.vehicleInfo?.number})
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <span
+                    className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                    ${
+                      person.status === "approved"
+                        ? "bg-green-100 text-green-800"
+                        : person.status === "pending"
+                        ? "bg-yellow-100 text-yellow-800"
+                        : "bg-red-100 text-red-800"
+                    }`}
+                  >
+                    {person.status}
+                  </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  {!person.isActive && (
+                    <button
+                      onClick={() => approveDeliveryPerson(person._id)}
+                      className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded text-sm"
+                    >
+                      Approve
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+export default AdminDeliveryPersonnel;
+
+
+/* File: ./client_web\src\pages\admin\RestaurantAdmins.jsx */
+import { useContext, useEffect, useState } from "react";
+import api from "../../utils/api";
+import { AuthContext } from "../../context/AuthContext";
+
+const AdminRestaurantAdmins = () => {
+  const { user } = useContext(AuthContext);
+  const [admins, setAdmins] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchAdmins = async () => {
+      try {
+        const response = await api.get("/api/users?role=restaurant_admin");
+        setAdmins(response.data.users);
+      } catch (err) {
+        setError(err.response?.data?.message || "Failed to fetch admins");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAdmins();
+  }, []);
+
+  const approveAdmin = async (userId, restaurantId) => {
+    try {
+      await api.patch("/api/users/restaurant-admin/approve", {
+        userId,
+        restaurantId,
+      });
+      setAdmins(
+        admins.map((admin) =>
+          admin._id === userId
+            ? { ...admin, isActive: true, status: "approved" }
+            : admin
+        )
+      );
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to approve admin");
+    }
+  };
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div className="text-red-500">{error}</div>;
+
+  return (
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-6">Restaurant Admins Management</h1>
+
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Name
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Email
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Restaurant
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {admins.map((admin) => (
+              <tr key={admin._id}>
+                <td className="px-6 py-4 whitespace-nowrap">{admin.name}</td>
+                <td className="px-6 py-4 whitespace-nowrap">{admin.email}</td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  {admin.restaurantDetails?.name || "N/A"}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <span
+                    className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                    ${
+                      admin.status === "approved"
+                        ? "bg-green-100 text-green-800"
+                        : admin.status === "pending"
+                        ? "bg-yellow-100 text-yellow-800"
+                        : "bg-red-100 text-red-800"
+                    }`}
+                  >
+                    {admin.status}
+                  </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  {!admin.isActive && (
+                    <button
+                      onClick={() =>
+                        approveAdmin(admin._id, "restaurant-id-here")
+                      }
+                      className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded text-sm"
+                    >
+                      Approve
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+export default AdminRestaurantAdmins;
+
+
+/* File: ./client_web\src\pages\admin\Users.jsx */
+import { useContext, useEffect, useState } from "react";
+import api from "../../utils/api";
+import { AuthContext } from "../../context/AuthContext";
+
+const AdminUsers = () => {
+  const { user } = useContext(AuthContext);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const response = await api.get("/api/users?role=customer");
+        setUsers(response.data.users);
+      } catch (err) {
+        setError(err.response?.data?.message || "Failed to fetch users");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUsers();
+  }, []);
+
+  const toggleUserStatus = async (userId, isActive) => {
+    try {
+      await api.patch(`/api/users/${userId}`, { isActive: !isActive });
+      setUsers(
+        users.map((user) =>
+          user._id === userId ? { ...user, isActive: !isActive } : user
+        )
+      );
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update user status");
+    }
+  };
+
+  const filteredUsers = users.filter(
+    (user) =>
+      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.phone.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div className="text-red-500">{error}</div>;
+
+  return (
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-6">Customer Management</h1>
+
+      <div className="mb-6">
+        <input
+          type="text"
+          placeholder="Search users..."
+          className="border border-gray-300 rounded-md px-4 py-2 w-full md:w-1/2"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Name
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Email
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Phone
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {filteredUsers.map((user) => (
+              <tr key={user._id}>
+                <td className="px-6 py-4 whitespace-nowrap">{user.name}</td>
+                <td className="px-6 py-4 whitespace-nowrap">{user.email}</td>
+                <td className="px-6 py-4 whitespace-nowrap">{user.phone}</td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <span
+                    className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                    ${
+                      user.isActive
+                        ? "bg-green-100 text-green-800"
+                        : "bg-red-100 text-red-800"
+                    }`}
+                  >
+                    {user.isActive ? "Active" : "Inactive"}
+                  </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <button
+                    onClick={() => toggleUserStatus(user._id, user.isActive)}
+                    className={`mr-2 px-3 py-1 rounded text-sm font-medium 
+                      ${
+                        user.isActive
+                          ? "bg-red-500 hover:bg-red-600 text-white"
+                          : "bg-green-500 hover:bg-green-600 text-white"
+                      }`}
+                  >
+                    {user.isActive ? "Deactivate" : "Activate"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+export default AdminUsers;
+
+
+/* File: ./client_web\src\pages\Auth\Login.jsx */
+import { useState, useContext } from "react";
+import { useNavigate } from "react-router-dom";
+import { AuthContext } from "../../context/AuthContext";
+
+const Login = () => {
+  const [credentials, setCredentials] = useState({
+    email: "",
+    phone: "",
+    password: "",
+  });
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const { login } = useContext(AuthContext);
+  const navigate = useNavigate();
+
+  const handleChange = (e) => {
+    setCredentials({
+      ...credentials,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      const { email, phone, password } = credentials;
+      const response = await login({ email, phone, password });
+
+      // Redirect based on role
+      if (response.user.role === "admin") {
+        navigate("/admin");
+      } else if (response.user.role === "restaurant_admin") {
+        navigate("/restaurant-admin");
+      } else {
+        navigate("/");
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8">
+        <div>
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+            Sign in to your account
+          </h2>
+        </div>
+
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
+            {error}
+          </div>
+        )}
+
+        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          <div className="rounded-md shadow-sm space-y-4">
+            <div>
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Email address
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                value={credentials.email}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="text-center">OR</div>
+
+            <div>
+              <label
+                htmlFor="phone"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Phone number
+              </label>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                value={credentials.phone}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="password"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Password
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                required
+                autoComplete="current-password"
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                value={credentials.password}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <input
+                id="remember-me"
+                name="remember-me"
+                type="checkbox"
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              />
+              <label
+                htmlFor="remember-me"
+                className="ml-2 block text-sm text-gray-900"
+              >
+                Remember me
+              </label>
+            </div>
+
+            <div className="text-sm">
+              <a
+                href="#"
+                className="font-medium text-blue-600 hover:text-blue-500"
+              >
+                Forgot your password?
+              </a>
+            </div>
+          </div>
+
+          <div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+            >
+              {loading ? "Signing in..." : "Sign in"}
+            </button>
+          </div>
+        </form>
+
+        <div className="text-center text-sm">
+          <p>
+            Need restaurant admin access?{" "}
+            <a
+              href="/restaurant-admin/request"
+              className="font-medium text-blue-600 hover:text-blue-500"
+            >
+              Request access
+            </a>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Login;
+
+
+/* File: ./client_web\src\pages\Auth\RestaurantAdminRequest.jsx */
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import api from "../../utils/api";
+
+const RestaurantAdminRequest = () => {
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    restaurantName: "",
+    licenseNumber: "",
+    address: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+  const navigate = useNavigate();
+
+  const handleChange = (e) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      await api.post("/api/users/restaurant-admin/request", formData);
+      setSuccess(true);
+      setTimeout(() => navigate("/login"), 3000);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to submit request");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (success) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-white p-8 rounded-lg shadow-md max-w-md w-full text-center">
+          <h2 className="text-2xl font-bold mb-4 text-green-600">
+            Request Submitted!
+          </h2>
+          <p className="mb-6">
+            Your restaurant admin request has been submitted for approval.
+            You'll be notified once it's processed.
+          </p>
+          <p>Redirecting to login page...</p>
+        </div>
+      </div>
     );
   }
 
-  Color _getRoleColor(String role) {
-    switch (role) {
-      case 'admin':
-        return Colors.red;
-      case 'restaurant_admin':
-        return Colors.orange;
-      case 'delivery_personnel':
-        return Colors.blue;
-      case 'customer':
-      default:
-        return Colors.green;
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-lg shadow-md">
+        <div>
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+            Restaurant Admin Request
+          </h2>
+          <p className="mt-2 text-center text-sm text-gray-600">
+            Fill out the form to request restaurant admin access
+          </p>
+        </div>
+
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
+            {error}
+          </div>
+        )}
+
+        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          <div className="rounded-md shadow-sm space-y-4">
+            <div>
+              <label
+                htmlFor="name"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Full Name
+              </label>
+              <input
+                id="name"
+                name="name"
+                type="text"
+                required
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                value={formData.name}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Email Address
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                required
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                value={formData.email}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="phone"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Phone Number
+              </label>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                required
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                value={formData.phone}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="restaurantName"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Restaurant Name
+              </label>
+              <input
+                id="restaurantName"
+                name="restaurantName"
+                type="text"
+                required
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                value={formData.restaurantName}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="licenseNumber"
+                className="block text-sm font-medium text-gray-700"
+              >
+                License Number
+              </label>
+              <input
+                id="licenseNumber"
+                name="licenseNumber"
+                type="text"
+                required
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                value={formData.licenseNumber}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="address"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Restaurant Address
+              </label>
+              <textarea
+                id="address"
+                name="address"
+                rows="3"
+                required
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                value={formData.address}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
+
+          <div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+            >
+              {loading ? "Submitting..." : "Submit Request"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default RestaurantAdminRequest;
+
+
+/* File: ./client_web\src\pages\restaurant-admin\Dashboard.jsx */
+import { useContext, useEffect, useState } from "react";
+import api from "../../utils/api";
+import { AuthContext } from "../../context/AuthContext";
+
+const RestaurantAdminDashboard = () => {
+  const { user } = useContext(AuthContext);
+  const [stats, setStats] = useState({
+    ordersToday: 0,
+    pendingOrders: 0,
+    completedOrders: 0,
+    totalRevenue: 0,
+  });
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        // These endpoints would need to be implemented in your backend
+        const [todayRes, pendingRes, completedRes, revenueRes] =
+          await Promise.all([
+            api.get(`/api/restaurants/${user.restaurantId}/orders/today`),
+            api.get(
+              `/api/restaurants/${user.restaurantId}/orders?status=pending`
+            ),
+            api.get(
+              `/api/restaurants/${user.restaurantId}/orders?status=completed`
+            ),
+            api.get(`/api/restaurants/${user.restaurantId}/revenue`),
+          ]);
+
+        setStats({
+          ordersToday: todayRes.data.count,
+          pendingOrders: pendingRes.data.count,
+          completedOrders: completedRes.data.count,
+          totalRevenue: revenueRes.data.amount,
+        });
+      } catch (error) {
+        console.error("Failed to fetch stats:", error);
+      }
+    };
+
+    if (user?.restaurantId) {
+      fetchStats();
     }
-  }
-}
+  }, [user]);
+
+  return (
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-6">Restaurant Dashboard</h1>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold">Orders Today</h3>
+          <p className="text-3xl font-bold">{stats.ordersToday}</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold">Pending Orders</h3>
+          <p className="text-3xl font-bold">{stats.pendingOrders}</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold">Completed Orders</h3>
+          <p className="text-3xl font-bold">{stats.completedOrders}</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h3 className="text-lg font-semibold">Total Revenue</h3>
+          <p className="text-3xl font-bold">${stats.totalRevenue.toFixed(2)}</p>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg shadow">
+        <h2 className="text-xl font-semibold mb-4">Recent Orders</h2>
+        {/* Recent orders list would go here */}
+        <p className="text-gray-500">No recent orders</p>
+      </div>
+    </div>
+  );
+};
+
+export default RestaurantAdminDashboard;
 
 
-/* File: ./client_customer/lib\services\api_service.dart */
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart';
+/* File: ./client_web\src\pages\restaurant-admin\Profile.jsx */
+import { useContext, useEffect, useState } from "react";
+import api from "../../utils/api";
+import { AuthContext } from "../../context/AuthContext";
 
-class ApiService {
-  static const String baseUrl = 'http://127.0.0.1:3000/api/users';
+const RestaurantAdminProfile = () => {
+  const { user } = useContext(AuthContext);
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [editMode, setEditMode] = useState(false);
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    address: "",
+  });
 
-  Future<Map<String, dynamic>> register({
-    required String name,
-    required String email,
-    required String phone,
-    required String password,
-    required String address,
-  }) async {
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const response = await api.get("/api/users/me");
+        setProfile(response.data.user);
+        setFormData({
+          name: response.data.user.name,
+          email: response.data.user.email,
+          phone: response.data.user.phone,
+          address: response.data.user.address || "",
+        });
+      } catch (err) {
+        setError(err.response?.data?.message || "Failed to fetch profile");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProfile();
+  }, []);
+
+  const handleChange = (e) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     try {
-      // Validate input parameters first
-      if (email.isEmpty || !email.contains('@')) {
-        return {
-          'success': false,
-          'message': 'Please enter a valid email address',
-          'errorCode': 'invalid_email',
-        };
-      }
-
-      if (password.length < 6) {
-        return {
-          'success': false,
-          'message': 'Password must be at least 6 characters',
-          'errorCode': 'weak_password',
-        };
-      }
-
-      final response = await http
-          .post(
-            Uri.parse('$baseUrl/register'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'name': name,
-              'email': email,
-              'phone': phone,
-              'password': password,
-              'address': address,
-              'role': 'customer',
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      // Handle empty or malformed response
-      if (response.body.isEmpty) {
-        return {
-          'success': false,
-          'message': 'Empty response from server',
-          'errorCode': 'empty_response',
-          'statusCode': response.statusCode,
-        };
-      }
-
-      final responseData = jsonDecode(response.body);
-
-      // Successful registration
-      if (response.statusCode == 201) {
-        return {
-          'success': true,
-          'token': responseData['token'],
-          'user': responseData['data']['user'],
-          'message': 'Registration successful',
-        };
-      }
-
-      // Handle specific error responses from server
-      if (response.statusCode == 400) {
-        return {
-          'success': false,
-          'message': responseData['message'] ?? 'Invalid request data',
-          'errorCode': responseData['errorCode'] ?? 'bad_request',
-          'validationErrors': responseData['errors'],
-          'statusCode': response.statusCode,
-        };
-      }
-
-      if (response.statusCode == 409) {
-        return {
-          'success': false,
-          'message': 'Email already in use',
-          'errorCode': 'email_conflict',
-          'statusCode': response.statusCode,
-        };
-      }
-
-      // Handle other status codes
-      return {
-        'success': false,
-        'message':
-            responseData['message'] ??
-            'Registration failed with status ${response.statusCode}',
-        'errorCode': responseData['errorCode'] ?? 'server_error',
-        'statusCode': response.statusCode,
-      };
-    } on SocketException catch (e) {
-      return {
-        'success': false,
-        'message': 'No internet connection',
-        'errorCode': 'no_connection',
-        'details': e.toString(),
-      };
-    } on TimeoutException catch (e) {
-      return {
-        'success': false,
-        'message': 'Connection timeout',
-        'errorCode': 'timeout',
-        'details': e.toString(),
-      };
-    } on http.ClientException catch (e) {
-      return {
-        'success': false,
-        'message': 'Network error occurred',
-        'errorCode': 'network_error',
-        'details': e.toString(),
-      };
-    } on FormatException catch (e) {
-      return {
-        'success': false,
-        'message': 'Invalid server response format',
-        'errorCode': 'invalid_format',
-        'details': e.toString(),
-      };
-    } catch (e) {
-      debugPrint('Registration error: $e');
-      return {
-        'success': false,
-        'message': 'An unexpected error occurred',
-        'errorCode': 'unknown_error',
-        'details': e.toString(),
-      };
+      const response = await api.patch("/api/users/update-me", formData);
+      setProfile(response.data.user);
+      setEditMode(false);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update profile");
     }
-  }
+  };
 
-  Future<Map<String, dynamic>> login({
-    required String email,
-    required String password,
-  }) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'password': password}),
-      );
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div className="text-red-500">{error}</div>;
+  if (!profile) return <div>No profile data</div>;
 
-      final responseData = jsonDecode(response.body);
+  return (
+    <div className="p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Profile</h1>
+        {!editMode && (
+          <button
+            onClick={() => setEditMode(true)}
+            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+          >
+            Edit Profile
+          </button>
+        )}
+      </div>
 
-      if (response.statusCode == 200) {
-        return {
-          'success': true,
-          'token': responseData['token'],
-          'user': responseData['data']['user'],
-        };
-      } else {
-        return {
-          'success': false,
-          'message': responseData['message'] ?? 'Login failed',
-        };
-      }
-    } catch (e) {
-      debugPrint('Login error: $e');
-      return {'success': false, 'message': 'An error occurred during login'};
+      {editMode ? (
+        <form
+          onSubmit={handleSubmit}
+          className="bg-white p-6 rounded-lg shadow"
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Name
+              </label>
+              <input
+                type="text"
+                name="name"
+                value={formData.name}
+                onChange={handleChange}
+                className="w-full border border-gray-300 rounded-md px-3 py-2"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Email
+              </label>
+              <input
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                className="w-full border border-gray-300 rounded-md px-3 py-2"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Phone
+              </label>
+              <input
+                type="tel"
+                name="phone"
+                value={formData.phone}
+                onChange={handleChange}
+                className="w-full border border-gray-300 rounded-md px-3 py-2"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Address
+              </label>
+              <input
+                type="text"
+                name="address"
+                value={formData.address}
+                onChange={handleChange}
+                className="w-full border border-gray-300 rounded-md px-3 py-2"
+              />
+            </div>
+          </div>
+
+          <div className="flex space-x-4">
+            <button
+              type="submit"
+              className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+            >
+              Save Changes
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditMode(false)}
+              className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <h3 className="text-sm font-medium text-gray-500">Name</h3>
+              <p className="mt-1 text-sm text-gray-900">{profile.name}</p>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-gray-500">Email</h3>
+              <p className="mt-1 text-sm text-gray-900">{profile.email}</p>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-gray-500">Phone</h3>
+              <p className="mt-1 text-sm text-gray-900">{profile.phone}</p>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-gray-500">Restaurant</h3>
+              <p className="mt-1 text-sm text-gray-900">
+                {profile.restaurantDetails?.name || "N/A"}
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-gray-500">Address</h3>
+              <p className="mt-1 text-sm text-gray-900">
+                {profile.address || "N/A"}
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-gray-500">Status</h3>
+              <p className="mt-1 text-sm text-gray-900">
+                <span
+                  className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                  ${
+                    profile.isActive
+                      ? "bg-green-100 text-green-800"
+                      : "bg-red-100 text-red-800"
+                  }`}
+                >
+                  {profile.isActive ? "Active" : "Inactive"}
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default RestaurantAdminProfile;
+
+
+/* File: ./client_web\src\utils\api.jsx */
+import axios from "axios";
+
+const api = axios.create({
+  baseURL: "http://localhost:3000",
+});
+
+// Add a request interceptor to include the token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem("token");
+    console.log("[INTERCEPTOR] Sending token:", token);
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
-  }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
-  Future<Map<String, dynamic>> getProfile(String token) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/me'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      final responseData = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        return {'success': true, 'user': responseData['data']['user']};
-      } else {
-        return {
-          'success': false,
-          'message': responseData['message'] ?? 'Failed to fetch profile',
-        };
-      }
-    } catch (e) {
-      debugPrint('Profile error: $e');
-      return {
-        'success': false,
-        'message': 'An error occurred while fetching profile',
-      };
-    }
-  }
-}
-
-
-/* File: ./client_customer/lib\services\auth_service.dart */
-import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-
-class AuthService {
-  static const String _tokenKey = 'auth_token';
-  static const String _userKey = 'auth_user';
-
-  Future<bool> saveAuthData(String token, String userJson) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_tokenKey, token);
-      await prefs.setString(_userKey, userJson);
-      return true;
-    } catch (e) {
-      debugPrint('Error saving auth data: $e');
-      return false;
-    }
-  }
-
-  Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_tokenKey);
-  }
-
-  Future<Map<String, dynamic>?> getUser() async {
-    final prefs = await SharedPreferences.getInstance();
-    final userJson = prefs.getString(_userKey);
-    if (userJson != null) {
-      return Map<String, dynamic>.from(jsonDecode(userJson));
-    }
-    return null;
-  }
-
-  Future<bool> clearAuthData() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_tokenKey);
-      await prefs.remove(_userKey);
-      return true;
-    } catch (e) {
-      debugPrint('Error clearing auth data: $e');
-      return false;
-    }
-  }
-}
+export default api;
 

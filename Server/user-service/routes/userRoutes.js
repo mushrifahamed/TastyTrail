@@ -1,6 +1,8 @@
+// ./server/user-service/routes/userRoutes.js
+
 const express = require("express");
 const router = express.Router();
-const upload = require("../utils/multer"); // For file uploads
+const upload = require("../utils/multer");
 const {
   // Admin
   createAdmin,
@@ -44,7 +46,23 @@ router.post(
 // Login (all roles)
 router.post("/login", login);
 
+// ==================== AUTHENTICATED USER ROUTES ====================
+// These routes require any authenticated user (customer, admin, etc.)
+router.use(
+  authMiddleware([
+    "customer",
+    "restaurant_admin",
+    "delivery_personnel",
+    "admin",
+  ])
+);
+
+// Profile management (must come BEFORE any parameterized routes)
+router.get("/me", getMe);
+router.patch("/update-me", updateMe);
+
 // ==================== ADMIN PROTECTED ROUTES ====================
+// These routes require admin role
 router.use(authMiddleware(["admin"]));
 
 // Admin user management
@@ -57,19 +75,5 @@ router.get("/", getAllUsers);
 router.get("/:id", getUser);
 router.patch("/:id", updateUser);
 router.delete("/:id", deleteUser);
-
-// ==================== AUTHENTICATED USER ROUTES ====================
-router.use(
-  authMiddleware([
-    "customer",
-    "restaurant_admin",
-    "delivery_personnel",
-    "admin",
-  ])
-);
-
-// Profile management
-router.get("/me", getMe);
-router.patch("/update-me", updateMe);
 
 module.exports = router;

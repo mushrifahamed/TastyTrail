@@ -1,19 +1,9 @@
-const twilio = require("twilio");
 const nodemailer = require("nodemailer");
 require("dotenv").config();
 
-const {
-  TWILIO_ACCOUNT_SID,
-  TWILIO_AUTH_TOKEN,
-  TWILIO_PHONE_NUMBER,
-  EMAIL_HOST,
-  EMAIL_PORT,
-  EMAIL_USER,
-  EMAIL_PASS,
-  ADMIN_EMAIL,
-} = process.env;
+const { EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, ADMIN_EMAIL } =
+  process.env;
 
-const smsClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 const emailTransporter = nodemailer.createTransport({
   host: EMAIL_HOST,
   port: EMAIL_PORT,
@@ -25,21 +15,6 @@ const emailTransporter = nodemailer.createTransport({
 });
 
 module.exports = {
-  // SMS Notifications
-  sendSMSNotification: async (phoneNumber, message) => {
-    try {
-      await smsClient.messages.create({
-        body: message,
-        from: TWILIO_PHONE_NUMBER,
-        to: phoneNumber,
-      });
-      return true;
-    } catch (error) {
-      console.error("Error sending SMS:", error);
-      return false;
-    }
-  },
-
   // Email Notifications
   sendEmailNotification: async (email, subject, message) => {
     try {
