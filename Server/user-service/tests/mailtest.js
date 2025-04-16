@@ -1,21 +1,36 @@
-// ./server/user-service/services/emailService.js (Mock)
-async function sendEmail(to, subject, text, html) {
-  const fakeInfo = {
-    messageId: "mocked-message-id-123",
-    envelope: {
-      from: "mock@tastytrail.dev",
-      to: to.split(",").map((email) => email.trim()),
-    },
-    accepted: [to],
-    rejected: [],
-    pending: [],
-    response: "250 Mock OK: queued as MOCK12345",
-    previewUrl: "https://ethereal.email/mock-preview-url",
-  };
+const nodemailer = require("nodemailer");
+require("dotenv").config();
 
-  console.log("MOCK: Message sent:", fakeInfo.messageId);
-  console.log("MOCK: Preview URL:", fakeInfo.previewUrl);
-  return fakeInfo;
-}
+// Create transporter using Gmail
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.G_USER,
+    pass: process.env.G_PASS,
+  },
+});
 
-module.exports = { sendEmail };
+// Email options
+const mailOptions = {
+  from: `"Bob from Your Business" <${process.env.G_USER}>`,
+  to: "segroup80@gmail.com",
+  subject: "Welcome! Your free trial is ready.",
+  text: "Hey there! Welcome to Your Business. We're happy to have you!",
+  html: `
+    <p>Hey there!</p>
+    <p>Welcome to Your Business, we're happy to have you here!</p>
+    <p>Your free trial awaits — just log in and get started.</p>
+    <br>
+    <p>Regards,</p>
+    <p>The Your Business Team</p>
+  `,
+};
+
+// Send the email
+transporter.sendMail(mailOptions, (error, info) => {
+  if (error) {
+    console.error("Error sending email:", error);
+  } else {
+    console.log("Email sent successfully:", info.response);
+  }
+});

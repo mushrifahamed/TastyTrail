@@ -12,8 +12,8 @@ const AdminUsers = () => {
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const response = await api.get("/api/users?role=customer");
-        setUsers(response.data.users);
+        const response = await api.get("/api/users");
+        setUsers(response.data.data.users);
       } catch (err) {
         setError(err.response?.data?.message || "Failed to fetch users");
       } finally {

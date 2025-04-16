@@ -1,38 +1,27 @@
 // ./server/user-service/services/emailService.js
 const nodemailer = require("nodemailer");
-
-// Create a reusable transporter object using Ethereal
-let testAccountPromise = nodemailer.createTestAccount();
+require("dotenv").config();
 
 async function sendEmail(to, subject, text, html) {
-  // Wait for test account to be created
-  const testAccount = await testAccountPromise;
-
-  console.log("Test account created:", testAccount.user, testAccount.pass);
-
-  // Create a transporter using Ethereal SMTP
+  // Create a transporter using Gmail SMTP
   const transporter = nodemailer.createTransport({
-    host: testAccount.smtp.host,
-    port: testAccount.smtp.port,
-    secure: testAccount.smtp.secure, // true for 465, false for other ports
+    service: "gmail",
     auth: {
-      user: testAccount.user,
-      pass: testAccount.pass,
+      user: process.env.G_USER, // your Gmail address
+      pass: process.env.G_PASS, // your App Password (not Gmail password)
     },
   });
 
   // Send mail with defined transport object
   let info = await transporter.sendMail({
-    from: `"TastyTrail Test" <${testAccount.user}>`,
+    from: `"TastyTrail" <${process.env.G_USER}>`,
     to,
     subject,
     text,
     html,
   });
 
-  // Preview URL for Ethereal
   console.log("Message sent: %s", info.messageId);
-  console.log("Preview URL: %s", nodemailer.getTestMessageUrl(info));
   return info;
 }
 
