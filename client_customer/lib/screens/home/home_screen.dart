@@ -6,10 +6,10 @@ import '../auth/login_screen.dart';
 import '../../models/user.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  const HomeScreen({super.key});
 
   @override
-  _HomeScreenState createState() => _HomeScreenState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
@@ -20,52 +20,44 @@ class _HomeScreenState extends State<HomeScreen> {
     final authProvider = Provider.of<AuthProvider>(context);
     final user = authProvider.user;
 
+    // Route protection: Only allow logged-in customers
+    if (user == null || authProvider.token == null || user.role != 'customer') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      });
+      return const SizedBox.shrink();
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Food Delivery'),
         actions: [
-          if (user != null)
-            IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: () async {
-                final authService = AuthService();
-                await authService.clearAuthData();
-                authProvider.logout();
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
-                );
-              },
-            ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              final navigator = Navigator.of(context);
+              final authService = AuthService();
+              await authService.clearAuthData();
+              authProvider.logout();
+              if (!mounted) return;
+              navigator.pushAndRemoveUntil(
+                MaterialPageRoute(builder: (context) => const LoginScreen()),
+                (route) => false,
+              );
+            },
+          ),
         ],
       ),
       body: _buildBody(context, user),
-      bottomNavigationBar: user != null ? _buildBottomNavBar() : null,
+      bottomNavigationBar: _buildBottomNavBar(),
     );
   }
 
-  Widget _buildBody(BuildContext context, User? user) {
-    if (user == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text('You are not logged in'),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
-                );
-              },
-              child: const Text('Login'),
-            ),
-          ],
-        ),
-      );
-    }
-
+  Widget _buildBody(BuildContext context, User user) {
     switch (_currentIndex) {
       case 0:
         return _buildHomeContent(user);
@@ -150,7 +142,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildRestaurantList() {
-    // This would be replaced with actual restaurant data from your API
     final dummyRestaurants = [
       {'name': 'Burger Palace', 'cuisine': 'American', 'rating': 4.5},
       {'name': 'Pizza Heaven', 'cuisine': 'Italian', 'rating': 4.2},

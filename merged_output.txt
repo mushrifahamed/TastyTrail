@@ -60,6 +60,7 @@ module.exports = connectDB;
 /* File: ./server/user-service\controllers\userController.js */
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const authService = require("../services/authService");
 const { sendEmail } = require("../services/emailService");
 const passwordUtils = require("../utils/passwordUtils");
@@ -661,9 +662,11 @@ module.exports = mongoose.model("users", userSchema);
 
 
 /* File: ./server/user-service\routes\userRoutes.js */
+// ./server/user-service/routes/userRoutes.js
+
 const express = require("express");
 const router = express.Router();
-const upload = require("../utils/multer"); // For file uploads
+const upload = require("../utils/multer");
 const {
   // Admin
   createAdmin,
@@ -707,7 +710,23 @@ router.post(
 // Login (all roles)
 router.post("/login", login);
 
+// ==================== AUTHENTICATED USER ROUTES ====================
+// These routes require any authenticated user (customer, admin, etc.)
+router.use(
+  authMiddleware([
+    "customer",
+    "restaurant_admin",
+    "delivery_personnel",
+    "admin",
+  ])
+);
+
+// Profile management (must come BEFORE any parameterized routes)
+router.get("/me", getMe);
+router.patch("/update-me", updateMe);
+
 // ==================== ADMIN PROTECTED ROUTES ====================
+// These routes require admin role
 router.use(authMiddleware(["admin"]));
 
 // Admin user management
@@ -721,31 +740,21 @@ router.get("/:id", getUser);
 router.patch("/:id", updateUser);
 router.delete("/:id", deleteUser);
 
-// ==================== AUTHENTICATED USER ROUTES ====================
-router.use(
-  authMiddleware([
-    "customer",
-    "restaurant_admin",
-    "delivery_personnel",
-    "admin",
-  ])
-);
-
-// Profile management
-router.get("/me", getMe);
-router.patch("/update-me", updateMe);
-
 module.exports = router;
 
 
 /* File: ./server/user-service\services\authService.js */
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 require("dotenv").config();
 
 const { JWT_SECRET, JWT_EXPIRES_IN } = process.env;
 
 module.exports = {
   generateToken: (userId, role) => {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      throw new Error("Invalid user ID for token generation");
+    }
     return jwt.sign({ id: userId, role }, JWT_SECRET, {
       expiresIn: JWT_EXPIRES_IN,
     });
@@ -764,39 +773,28 @@ module.exports = {
 /* File: ./server/user-service\services\emailService.js */
 // ./server/user-service/services/emailService.js
 const nodemailer = require("nodemailer");
-
-// Create a reusable transporter object using Ethereal
-let testAccountPromise = nodemailer.createTestAccount();
+require("dotenv").config();
 
 async function sendEmail(to, subject, text, html) {
-  // Wait for test account to be created
-  const testAccount = await testAccountPromise;
-
-  console.log("Test account created:", testAccount.user, testAccount.pass);
-
-  // Create a transporter using Ethereal SMTP
+  // Create a transporter using Gmail SMTP
   const transporter = nodemailer.createTransport({
-    host: testAccount.smtp.host,
-    port: testAccount.smtp.port,
-    secure: testAccount.smtp.secure, // true for 465, false for other ports
+    service: "gmail",
     auth: {
-      user: testAccount.user,
-      pass: testAccount.pass,
+      user: process.env.G_USER, // your Gmail address
+      pass: process.env.G_PASS, // your App Password (not Gmail password)
     },
   });
 
   // Send mail with defined transport object
   let info = await transporter.sendMail({
-    from: `"TastyTrail Test" <${testAccount.user}>`,
+    from: `"TastyTrail" <${process.env.G_USER}>`,
     to,
     subject,
     text,
     html,
   });
 
-  // Preview URL for Ethereal
   console.log("Message sent: %s", info.messageId);
-  console.log("Preview URL: %s", nodemailer.getTestMessageUrl(info));
   return info;
 }
 
@@ -879,27 +877,42 @@ module.exports = {
 
 
 /* File: ./server/user-service\tests\mailtest.js */
-// ./server/user-service/services/emailService.js (Mock)
-async function sendEmail(to, subject, text, html) {
-  const fakeInfo = {
-    messageId: "mocked-message-id-123",
-    envelope: {
-      from: "mock@tastytrail.dev",
-      to: to.split(",").map((email) => email.trim()),
-    },
-    accepted: [to],
-    rejected: [],
-    pending: [],
-    response: "250 Mock OK: queued as MOCK12345",
-    previewUrl: "https://ethereal.email/mock-preview-url",
-  };
+const nodemailer = require("nodemailer");
+require("dotenv").config();
 
-  console.log("MOCK: Message sent:", fakeInfo.messageId);
-  console.log("MOCK: Preview URL:", fakeInfo.previewUrl);
-  return fakeInfo;
-}
+// Create transporter using Gmail
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.G_USER,
+    pass: process.env.G_PASS,
+  },
+});
 
-module.exports = { sendEmail };
+// Email options
+const mailOptions = {
+  from: `"Bob from Your Business" <${process.env.G_USER}>`,
+  to: "segroup80@gmail.com",
+  subject: "Welcome! Your free trial is ready.",
+  text: "Hey there! Welcome to Your Business. We're happy to have you!",
+  html: `
+    <p>Hey there!</p>
+    <p>Welcome to Your Business, we're happy to have you here!</p>
+    <p>Your free trial awaits — just log in and get started.</p>
+    <br>
+    <p>Regards,</p>
+    <p>The Your Business Team</p>
+  `,
+};
+
+// Send the email
+transporter.sendMail(mailOptions, (error, info) => {
+  if (error) {
+    console.error("Error sending email:", error);
+  } else {
+    console.log("Email sent successfully:", info.response);
+  }
+});
 
 
 /* File: ./server/user-service\utils\authMiddleware.js */

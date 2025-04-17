@@ -138,33 +138,77 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> login({
-    required String email,
+    String? email,
+    String? phone,
     required String password,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'password': password}),
-      );
+      // Validate at least one identifier is provided
+      if ((email == null || email.isEmpty) &&
+          (phone == null || phone.isEmpty)) {
+        return {
+          'success': false,
+          'message': 'Email or phone required',
+          'errorCode': 'missing_credentials',
+        };
+      }
+
+      final body = <String, dynamic>{'password': password};
+      if (email != null && email.isNotEmpty) body['email'] = email;
+      if (phone != null && phone.isNotEmpty) body['phone'] = phone;
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 15));
 
       final responseData = jsonDecode(response.body);
 
-      if (response.statusCode == 200) {
-        return {
-          'success': true,
-          'token': responseData['token'],
-          'user': responseData['data']['user'],
-        };
-      } else {
-        return {
-          'success': false,
-          'message': responseData['message'] ?? 'Login failed',
-        };
+      switch (response.statusCode) {
+        case 200:
+          return {
+            'success': true,
+            'token': responseData['token'],
+            'user': responseData['data']['user'],
+          };
+        case 400:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Invalid request',
+            'errorCode': responseData['errorCode'] ?? 'bad_request',
+          };
+        case 401:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Invalid credentials',
+            'errorCode': 'invalid_credentials',
+          };
+        case 403:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Account not active',
+            'errorCode':
+                responseData['details']?.toString() ?? 'inactive_account',
+          };
+        default:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Login failed',
+            'statusCode': response.statusCode,
+          };
       }
+    } on SocketException {
+      return {'success': false, 'message': 'No internet connection'};
+    } on TimeoutException {
+      return {'success': false, 'message': 'Connection timeout'};
+    } on http.ClientException catch (e) {
+      return {'success': false, 'message': 'Network error: ${e.message}'};
     } catch (e) {
       debugPrint('Login error: $e');
-      return {'success': false, 'message': 'An error occurred during login'};
+      return {'success': false, 'message': 'An unexpected error occurred'};
     }
   }
 
