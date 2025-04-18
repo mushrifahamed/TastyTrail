@@ -1,9 +1,16 @@
 const Restaurant = require('../models/restaurantModel');
 const { calculateDistance } = require('../utils/geolocation');
+const upload = require('../config/multerConfig');
 
-// Add new restaurant
+// Add new restaurant with cover image and multiple menu item images
 const addRestaurant = async (req, res) => {
-  const { name, description, address, menu, operatingHours } = req.body;
+  const { name, description, address, menu, operatingHours, menuItemNames } = req.body;
+
+  // Handle file upload for the cover image
+  const coverImage = req.file ? req.file.path : null; // Store the cover image file path
+
+  // Handle file upload for menu item images (multiple files)
+  const menuItemImages = req.files; // Multer will upload multiple files as an array in `req.files`
 
   try {
     // Check if restaurant already exists
@@ -12,15 +19,27 @@ const addRestaurant = async (req, res) => {
       return res.status(400).json({ message: 'Restaurant already exists' });
     }
 
+    // Create a new restaurant instance
     const newRestaurant = new Restaurant({
       name,
       description,
       address,
       menu,
       operatingHours,
-      availability: true, // Default availability is true
+      availability: true,  // Default availability is true
+      coverImage,          // Save the cover image URL/path
     });
 
+    // For each menu item, associate the uploaded image
+    if (menuItemImages) {
+      menu.forEach((menuItem, index) => {
+        if (menuItemImages[index]) {
+          menuItem.image = menuItemImages[index].path; // Assign image path to each menu item
+        }
+      });
+    }
+
+    // Save the new restaurant
     await newRestaurant.save();
     res.status(201).json(newRestaurant);
   } catch (err) {
@@ -78,14 +97,23 @@ const toggleAvailability = async (req, res) => {
   }
 };
 
-// Manage menu (add/update/remove items)
+
+// Manage menu items (add/update/remove items with images)
 const manageMenu = async (req, res) => {
   const { restaurantId, action, menuItemId, menuItem } = req.body;
+
+  // Handle image upload for the menu item
+  const menuItemImage = req.file ? req.file.path : null;
 
   try {
     const restaurant = await Restaurant.findById(restaurantId);
     if (!restaurant) {
       return res.status(404).json({ message: 'Restaurant not found' });
+    }
+
+    // Check if an image needs to be added or updated for the menu item
+    if (menuItemImage) {
+      menuItem.image = menuItemImage;
     }
 
     if (action === 'add') {

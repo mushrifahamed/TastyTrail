@@ -5,6 +5,7 @@ const menuItemSchema = new mongoose.Schema({
   description: String,
   price: Number,
   category: String,
+  image: String, // menu item image
 });
 
 const restaurantSchema = new mongoose.Schema({
@@ -26,6 +27,7 @@ const restaurantSchema = new mongoose.Schema({
     to: { type: String },
   },
   rating: { type: Number, default: 0 },
+  coverImage: String, // restaurant cover image
 });
 
 restaurantSchema.index({ 'address.geoCoordinates': '2dsphere' });
