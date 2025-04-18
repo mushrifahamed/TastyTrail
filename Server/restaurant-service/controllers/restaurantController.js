@@ -1,5 +1,4 @@
 const Restaurant = require('../models/restaurantModel');
-const orderService = require('../services/orderService');
 const { calculateDistance } = require('../utils/geolocation');
 
 // Add new restaurant
@@ -79,29 +78,6 @@ const toggleAvailability = async (req, res) => {
   }
 };
 
-// Accept an order
-const acceptOrder = async (req, res) => {
-  const { restaurantId, orderId } = req.body;
-  try {
-    const order = await orderService.acceptOrder(restaurantId, orderId);
-    res.status(200).json({ message: 'Order accepted', order });
-  } catch (err) {
-    res.status(500).json({ message: 'Error accepting order', err });
-  }
-};
-
-// Update order status (e.g., preparing, ready for pickup)
-const updateOrderStatus = async (req, res) => {
-  const { restaurantId, orderId, status } = req.body;
-
-  try {
-    const updatedOrder = await orderService.updateOrderStatus(orderId, status);
-    res.status(200).json({ message: 'Order status updated', updatedOrder });
-  } catch (err) {
-    res.status(500).json({ message: 'Error updating order status', err });
-  }
-};
-
 // Manage menu (add/update/remove items)
 const manageMenu = async (req, res) => {
   const { restaurantId, action, menuItemId, menuItem } = req.body;
@@ -149,19 +125,10 @@ const searchRestaurants = async (req, res) => {
   }
 };
 
-// Real-time updates for order status (using WebSocket)
-const realTimeOrderUpdate = (orderId, status) => {
-  // Emit the order status update to all connected clients
-  io.emit('order-status-update', { orderId, status });
-};
-
 module.exports = {
   addRestaurant,
   getNearbyRestaurants,
   toggleAvailability,
-  acceptOrder,
-  updateOrderStatus,
   manageMenu,
-  searchRestaurants,
-  realTimeOrderUpdate,
+  searchRestaurants
 };
