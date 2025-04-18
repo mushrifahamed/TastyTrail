@@ -1,0 +1,1109 @@
+
+/* File: ./client_customer/lib\main.dart */
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'providers/auth_provider.dart';
+import 'services/auth_service.dart';
+import 'models/user.dart';
+import 'screens/auth/login_screen.dart';
+import 'screens/home/home_screen.dart';
+import 'screens/auth/register_screen.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final authService = AuthService();
+  final token = await authService.getToken();
+  final userJson = await authService.getUser();
+  User? initialUser;
+  if (userJson != null) {
+    initialUser = User.fromJson(userJson);
+  }
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create:
+              (_) =>
+                  AuthProvider()
+                    ..setToken(token ?? '')
+                    ..setUser(
+                      initialUser ??
+                          User(id: '', name: '', email: '', role: ''),
+                    ),
+        ),
+      ],
+      child: const MyApp(),
+    ),
+  );
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final isCustomer =
+        authProvider.user != null && authProvider.user!.role == 'customer';
+
+    return MaterialApp(
+      title: 'Food Delivery App',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
+      ),
+      debugShowCheckedModeBanner: false,
+      home:
+          (authProvider.isAuth && isCustomer)
+              ? const HomeScreen()
+              : const LoginScreen(),
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/register': (context) => const RegisterScreen(),
+        '/home': (context) => const HomeScreen(),
+      },
+    );
+  }
+}
+
+
+/* File: ./client_customer/lib\models\user.dart */
+class User {
+  final String id;
+  final String name;
+  final String email;
+  final String role;
+  final String? phone;
+  final String? address;
+
+  User({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.role,
+    this.phone,
+    this.address,
+  });
+
+  factory User.fromJson(Map<String, dynamic> json) {
+    return User(
+      id: json['_id'],
+      name: json['name'],
+      email: json['email'],
+      role: json['role'],
+      phone: json['phone'],
+      address: json['address'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      '_id': id,
+      'name': name,
+      'email': email,
+      'role': role,
+      'phone': phone,
+      'address': address,
+    };
+  }
+}
+
+
+/* File: ./client_customer/lib\providers\auth_provider.dart */
+import 'package:flutter/foundation.dart';
+import '../models/user.dart';
+
+class AuthProvider with ChangeNotifier {
+  User? _user;
+  String? _token;
+
+  User? get user => _user;
+  String? get token => _token;
+  bool get isAuth => _token != null;
+
+  void setUser(User user) {
+    _user = user;
+    notifyListeners();
+  }
+
+  void setToken(String token) {
+    _token = token;
+    notifyListeners();
+  }
+
+  Future<void> logout() async {
+    _user = null;
+    _token = null;
+    notifyListeners();
+  }
+}
+
+
+/* File: ./client_customer/lib\screens\auth\login_screen.dart */
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'dart:convert';
+import '../../services/api_service.dart';
+import '../../services/auth_service.dart';
+import '../../providers/auth_provider.dart';
+import '../home/home_screen.dart';
+import 'register_screen.dart';
+import '../../models/user.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({Key? key}) : super(key: key);
+
+  @override
+  _LoginScreenState createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _phoneController = TextEditingController();
+  bool _isLoading = false;
+  String? _errorMessage;
+
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final apiService = ApiService();
+    final authService = AuthService();
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    final result = await apiService.login(
+      email: _emailController.text.trim(),
+      phone: _phoneController.text.trim(),
+      password: _passwordController.text.trim(),
+    );
+
+    if (result['success'] == true) {
+      final user = User.fromJson(result['user']);
+
+      // Restrict access to only "customer" role
+      if (user.role != 'customer') {
+        setState(() {
+          _errorMessage = 'Only customers are allowed to log in.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      await authService.saveAuthData(
+        result['token'],
+        jsonEncode(user.toJson()),
+      );
+      authProvider.setUser(user);
+      authProvider.setToken(result['token']);
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    } else {
+      setState(() {
+        _errorMessage = result['message'];
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Login'), centerTitle: true),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _emailController,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  prefixIcon: Icon(Icons.email),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.emailAddress,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter your email';
+                  }
+                  if (!RegExp(
+                    r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                  ).hasMatch(value)) {
+                    return 'Please enter a valid email';
+                  }
+                  return null;
+                },
+              ),
+              TextFormField(
+                controller: _phoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Phone (alternative to email)',
+                  prefixIcon: Icon(Icons.phone),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _passwordController,
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  prefixIcon: Icon(Icons.lock),
+                  border: OutlineInputBorder(),
+                ),
+                obscureText: true,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter your password';
+                  }
+                  if (value.length < 6) {
+                    return 'Password must be at least 6 characters';
+                  }
+                  return null;
+                },
+              ),
+              if (_errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16.0),
+                  child: Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _isLoading ? null : _login,
+                child:
+                    _isLoading
+                        ? const CircularProgressIndicator()
+                        : const Text('Login'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const RegisterScreen(),
+                    ),
+                  );
+                },
+                child: const Text('Don\'t have an account? Register here'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+/* File: ./client_customer/lib\screens\auth\register_screen.dart */
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'dart:convert';
+import '../../services/api_service.dart';
+import '../../services/auth_service.dart';
+import '../../providers/auth_provider.dart';
+import '../home/home_screen.dart';
+import '../../models/user.dart';
+
+class RegisterScreen extends StatefulWidget {
+  const RegisterScreen({Key? key}) : super(key: key);
+
+  @override
+  _RegisterScreenState createState() => _RegisterScreenState();
+}
+
+class _RegisterScreenState extends State<RegisterScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _addressController = TextEditingController();
+  bool _isLoading = false;
+  String? _errorMessage;
+
+  Future<void> _register() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final apiService = ApiService();
+    final authService = AuthService();
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    final result = await apiService.register(
+      name: _nameController.text.trim(),
+      email: _emailController.text.trim(),
+      phone: _phoneController.text.trim(),
+      password: _passwordController.text.trim(),
+      address: _addressController.text.trim(),
+    );
+
+    if (result['success'] == true) {
+      final user = User.fromJson(result['user']);
+      await authService.saveAuthData(
+        result['token'],
+        jsonEncode(user.toJson()),
+      );
+      authProvider.setUser(user);
+      authProvider.setToken(result['token']);
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    } else {
+      setState(() {
+        _errorMessage = result['message'];
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Register'), centerTitle: true),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Full Name',
+                  prefixIcon: Icon(Icons.person),
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter your name';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _emailController,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  prefixIcon: Icon(Icons.email),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.emailAddress,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter your email';
+                  }
+                  if (!RegExp(
+                    r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                  ).hasMatch(value)) {
+                    return 'Please enter a valid email';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _phoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Phone Number',
+                  prefixIcon: Icon(Icons.phone),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.phone,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter your phone number';
+                  }
+                  if (!RegExp(r'^\+?[\d\s-]{10,}$').hasMatch(value)) {
+                    return 'Enter a valid phone number (e.g. +94771234567)';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _passwordController,
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  prefixIcon: Icon(Icons.lock),
+                  border: OutlineInputBorder(),
+                ),
+                obscureText: true,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter a password';
+                  }
+                  if (value.length < 6) {
+                    return 'Password must be at least 6 characters';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _addressController,
+                decoration: const InputDecoration(
+                  labelText: 'Address',
+                  prefixIcon: Icon(Icons.home),
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 2,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Address is required for customers';
+                  }
+                  return null;
+                },
+              ),
+
+              if (_errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16.0),
+                  child: Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _isLoading ? null : _register,
+                child:
+                    _isLoading
+                        ? const CircularProgressIndicator()
+                        : const Text('Register'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+                child: const Text('Already have an account? Login here'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+/* File: ./client_customer/lib\screens\home\home_screen.dart */
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../services/auth_service.dart';
+import '../auth/login_screen.dart';
+import '../../models/user.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _currentIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final user = authProvider.user;
+
+    // Route protection: Only allow logged-in customers
+    if (user == null || authProvider.token == null || user.role != 'customer') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      });
+      return const SizedBox.shrink();
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Food Delivery'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              final navigator = Navigator.of(context);
+              final authService = AuthService();
+              await authService.clearAuthData();
+              authProvider.logout();
+              if (!mounted) return;
+              navigator.pushAndRemoveUntil(
+                MaterialPageRoute(builder: (context) => const LoginScreen()),
+                (route) => false,
+              );
+            },
+          ),
+        ],
+      ),
+      body: _buildBody(context, user),
+      bottomNavigationBar: _buildBottomNavBar(),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, User user) {
+    switch (_currentIndex) {
+      case 0:
+        return _buildHomeContent(user);
+      case 1:
+        return _buildProfileContent(user);
+      default:
+        return _buildHomeContent(user);
+    }
+  }
+
+  Widget _buildHomeContent(User user) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Welcome, ${user.name}!',
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+          const Text('Your role:', style: TextStyle(fontSize: 18)),
+          Chip(
+            label: Text(
+              user.role.toUpperCase(),
+              style: const TextStyle(color: Colors.white),
+            ),
+            backgroundColor: _getRoleColor(user.role),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'Featured Restaurants',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+          _buildRestaurantList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileContent(User user) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Your Profile',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 24),
+          ListTile(
+            leading: const Icon(Icons.person),
+            title: const Text('Name'),
+            subtitle: Text(user.name),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.email),
+            title: const Text('Email'),
+            subtitle: Text(user.email),
+          ),
+          const Divider(),
+          if (user.phone != null)
+            ListTile(
+              leading: const Icon(Icons.phone),
+              title: const Text('Phone'),
+              subtitle: Text(user.phone!),
+            ),
+          if (user.phone != null) const Divider(),
+          if (user.address != null)
+            ListTile(
+              leading: const Icon(Icons.home),
+              title: const Text('Address'),
+              subtitle: Text(user.address!),
+            ),
+          if (user.address != null) const Divider(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRestaurantList() {
+    final dummyRestaurants = [
+      {'name': 'Burger Palace', 'cuisine': 'American', 'rating': 4.5},
+      {'name': 'Pizza Heaven', 'cuisine': 'Italian', 'rating': 4.2},
+      {'name': 'Sushi World', 'cuisine': 'Japanese', 'rating': 4.7},
+      {'name': 'Taco Fiesta', 'cuisine': 'Mexican', 'rating': 4.3},
+      {'name': 'Curry House', 'cuisine': 'Indian', 'rating': 4.6},
+    ];
+
+    return Column(
+      children:
+          dummyRestaurants.map((restaurant) {
+            return Card(
+              margin: const EdgeInsets.only(bottom: 16),
+              child: ListTile(
+                contentPadding: const EdgeInsets.all(16),
+                leading: const Icon(Icons.restaurant, size: 40),
+                title: Text(
+                  restaurant['name'] as String,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(restaurant['cuisine'] as String),
+                trailing: Chip(
+                  label: Text(restaurant['rating'].toString()),
+                  backgroundColor: Colors.amber[100],
+                ),
+                onTap: () {
+                  // Would navigate to restaurant details
+                },
+              ),
+            );
+          }).toList(),
+    );
+  }
+
+  BottomNavigationBar _buildBottomNavBar() {
+    return BottomNavigationBar(
+      currentIndex: _currentIndex,
+      onTap: (index) {
+        setState(() {
+          _currentIndex = index;
+        });
+      },
+      items: const [
+        BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+        BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+      ],
+    );
+  }
+
+  Color _getRoleColor(String role) {
+    switch (role) {
+      case 'admin':
+        return Colors.red;
+      case 'restaurant_admin':
+        return Colors.orange;
+      case 'delivery_personnel':
+        return Colors.blue;
+      case 'customer':
+      default:
+        return Colors.green;
+    }
+  }
+}
+
+
+/* File: ./client_customer/lib\services\api_service.dart */
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
+
+class ApiService {
+  static const String baseUrl = 'http://127.0.0.1:3000/api/users';
+
+  Future<Map<String, dynamic>> register({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+    required String address,
+  }) async {
+    try {
+      // Validate input parameters first
+      if (email.isEmpty || !email.contains('@')) {
+        return {
+          'success': false,
+          'message': 'Please enter a valid email address',
+          'errorCode': 'invalid_email',
+        };
+      }
+
+      if (password.length < 6) {
+        return {
+          'success': false,
+          'message': 'Password must be at least 6 characters',
+          'errorCode': 'weak_password',
+        };
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/register'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'name': name,
+              'email': email,
+              'phone': phone,
+              'password': password,
+              'address': address,
+              'role': 'customer',
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      // Handle empty or malformed response
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'errorCode': 'empty_response',
+          'statusCode': response.statusCode,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      // Successful registration
+      if (response.statusCode == 201) {
+        return {
+          'success': true,
+          'token': responseData['token'],
+          'user': responseData['data']['user'],
+          'message': 'Registration successful',
+        };
+      }
+
+      // Handle specific error responses from server
+      if (response.statusCode == 400) {
+        return {
+          'success': false,
+          'message': responseData['message'] ?? 'Invalid request data',
+          'errorCode': responseData['errorCode'] ?? 'bad_request',
+          'validationErrors': responseData['errors'],
+          'statusCode': response.statusCode,
+        };
+      }
+
+      if (response.statusCode == 409) {
+        return {
+          'success': false,
+          'message': 'Email already in use',
+          'errorCode': 'email_conflict',
+          'statusCode': response.statusCode,
+        };
+      }
+
+      // Handle other status codes
+      return {
+        'success': false,
+        'message':
+            responseData['message'] ??
+            'Registration failed with status ${response.statusCode}',
+        'errorCode': responseData['errorCode'] ?? 'server_error',
+        'statusCode': response.statusCode,
+      };
+    } on SocketException catch (e) {
+      return {
+        'success': false,
+        'message': 'No internet connection',
+        'errorCode': 'no_connection',
+        'details': e.toString(),
+      };
+    } on TimeoutException catch (e) {
+      return {
+        'success': false,
+        'message': 'Connection timeout',
+        'errorCode': 'timeout',
+        'details': e.toString(),
+      };
+    } on http.ClientException catch (e) {
+      return {
+        'success': false,
+        'message': 'Network error occurred',
+        'errorCode': 'network_error',
+        'details': e.toString(),
+      };
+    } on FormatException catch (e) {
+      return {
+        'success': false,
+        'message': 'Invalid server response format',
+        'errorCode': 'invalid_format',
+        'details': e.toString(),
+      };
+    } catch (e) {
+      debugPrint('Registration error: $e');
+      return {
+        'success': false,
+        'message': 'An unexpected error occurred',
+        'errorCode': 'unknown_error',
+        'details': e.toString(),
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> login({
+    String? email,
+    String? phone,
+    required String password,
+  }) async {
+    try {
+      // Validate at least one identifier is provided
+      if ((email == null || email.isEmpty) &&
+          (phone == null || phone.isEmpty)) {
+        return {
+          'success': false,
+          'message': 'Email or phone required',
+          'errorCode': 'missing_credentials',
+        };
+      }
+
+      final body = <String, dynamic>{'password': password};
+      if (email != null && email.isNotEmpty) body['email'] = email;
+      if (phone != null && phone.isNotEmpty) body['phone'] = phone;
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final responseData = jsonDecode(response.body);
+
+      switch (response.statusCode) {
+        case 200:
+          return {
+            'success': true,
+            'token': responseData['token'],
+            'user': responseData['data']['user'],
+          };
+        case 400:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Invalid request',
+            'errorCode': responseData['errorCode'] ?? 'bad_request',
+          };
+        case 401:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Invalid credentials',
+            'errorCode': 'invalid_credentials',
+          };
+        case 403:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Account not active',
+            'errorCode':
+                responseData['details']?.toString() ?? 'inactive_account',
+          };
+        default:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Login failed',
+            'statusCode': response.statusCode,
+          };
+      }
+    } on SocketException {
+      return {'success': false, 'message': 'No internet connection'};
+    } on TimeoutException {
+      return {'success': false, 'message': 'Connection timeout'};
+    } on http.ClientException catch (e) {
+      return {'success': false, 'message': 'Network error: ${e.message}'};
+    } catch (e) {
+      debugPrint('Login error: $e');
+      return {'success': false, 'message': 'An unexpected error occurred'};
+    }
+  }
+
+  Future<Map<String, dynamic>> getProfile(String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/me'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'user': responseData['data']['user']};
+      } else {
+        return {
+          'success': false,
+          'message': responseData['message'] ?? 'Failed to fetch profile',
+        };
+      }
+    } catch (e) {
+      debugPrint('Profile error: $e');
+      return {
+        'success': false,
+        'message': 'An error occurred while fetching profile',
+      };
+    }
+  }
+}
+
+
+/* File: ./client_customer/lib\services\auth_service.dart */
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+
+class AuthService {
+  static const String _tokenKey = 'auth_token';
+  static const String _userKey = 'auth_user';
+
+  Future<bool> saveAuthData(String token, String userJson) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_tokenKey, token);
+      await prefs.setString(_userKey, userJson);
+      return true;
+    } catch (e) {
+      debugPrint('Error saving auth data: $e');
+      return false;
+    }
+  }
+
+  Future<String?> getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_tokenKey);
+  }
+
+  Future<Map<String, dynamic>?> getUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userJson = prefs.getString(_userKey);
+    if (userJson != null) {
+      return Map<String, dynamic>.from(jsonDecode(userJson));
+    }
+    return null;
+  }
+
+  Future<bool> clearAuthData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_tokenKey);
+      await prefs.remove(_userKey);
+      return true;
+    } catch (e) {
+      debugPrint('Error clearing auth data: $e');
+      return false;
+    }
+  }
+}
+
+
+/* File: ./client_customer/lib\theme\app_theme.dart */
+import 'package:flutter/material.dart';
+
+class AppColors {
+  static const primary = Color(0xFF4F46E5); // Example purple
+  static const secondary = Color(0xFFF59E42); // Example orange
+  static const background = Color(0xFFF3F4F6);
+  static const error = Color(0xFFEF4444);
+  static const text = Color(0xFF111827);
+  // Add more as needed
+}
+
+class AppTheme {
+  static ThemeData get lightTheme {
+    return ThemeData(
+      fontFamily: 'Inter',
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColors.primary,
+        brightness: Brightness.light,
+      ),
+      scaffoldBackgroundColor: AppColors.background,
+      textTheme: const TextTheme(
+        displayLarge: TextStyle(fontSize: 72, fontWeight: FontWeight.bold),
+        titleLarge: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+        bodyMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.normal),
+        labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        titleTextStyle: TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          textStyle: const TextStyle(
+            fontFamily: 'Inter',
+            fontWeight: FontWeight.w600,
+            fontSize: 16,
+          ),
+        ),
+      ),
+      inputDecorationTheme: const InputDecorationTheme(
+        border: OutlineInputBorder(),
+        labelStyle: TextStyle(fontFamily: 'Inter'),
+      ),
+    );
+  }
+}
+
