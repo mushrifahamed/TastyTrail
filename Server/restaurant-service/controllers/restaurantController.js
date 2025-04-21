@@ -91,10 +91,6 @@ const getNearbyRestaurants = async (req, res) => {
   }
 };
 
-module.exports = {
-  getNearbyRestaurants,
-};
-
 // Update restaurant availability
 const toggleAvailability = async (req, res) => {
   const { id } = req.params;
