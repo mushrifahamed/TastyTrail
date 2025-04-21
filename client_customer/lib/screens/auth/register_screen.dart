@@ -1,3 +1,4 @@
+import 'package:client_customer/screens/auth/login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
@@ -287,16 +288,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 32),
                 Center(
                   child: GestureDetector(
-                    onTap: () => Navigator.pop(context),
+                    onTap: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const LoginScreen(),
+                        ),
+                      );
+                    },
                     child: RichText(
                       text: TextSpan(
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.black,
-                        ),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(color: Colors.black),
                         children: [
-                          const TextSpan(text: "Don't have an account? "),
+                          const TextSpan(text: "Have an account? "),
                           TextSpan(
-                            text: "Sign In",
+                            text: "Log in",
                             style: TextStyle(
                               color: AppColors.primary,
                               fontWeight: FontWeight.w600,
