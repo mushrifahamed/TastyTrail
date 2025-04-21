@@ -1,12 +1,3 @@
-<<<<<<< HEAD
-const Restaurant = require('../models/restaurantModel');
-const { calculateDistance } = require('../utils/geolocation');
-const upload = require('../config/multerConfig');
-
-// Add new restaurant with cover image and multiple menu item images
-const addRestaurant = async (req, res) => {
-  const { name, description, address, menu, operatingHours, menuItemNames } = req.body;
-=======
 const Restaurant = require("../models/restaurantModel");
 const { calculateDistance } = require("../utils/geolocation");
 const upload = require("../config/multerConfig");
@@ -15,7 +6,6 @@ const upload = require("../config/multerConfig");
 const addRestaurant = async (req, res) => {
   const { name, description, address, menu, operatingHours, menuItemNames } =
     req.body;
->>>>>>> origin/aathifzahir
 
   // Handle file upload for the cover image
   const coverImage = req.file ? req.file.path : null; // Store the cover image file path
@@ -27,11 +17,7 @@ const addRestaurant = async (req, res) => {
     // Check if restaurant already exists
     const existingRestaurant = await Restaurant.findOne({ name });
     if (existingRestaurant) {
-<<<<<<< HEAD
-      return res.status(400).json({ message: 'Restaurant already exists' });
-=======
       return res.status(400).json({ message: "Restaurant already exists" });
->>>>>>> origin/aathifzahir
     }
 
     // Create a new restaurant instance
@@ -41,13 +27,8 @@ const addRestaurant = async (req, res) => {
       address,
       menu,
       operatingHours,
-<<<<<<< HEAD
-      availability: true,  // Default availability is true
-      coverImage,          // Save the cover image URL/path
-=======
       availability: true, // Default availability is true
       coverImage, // Save the cover image URL/path
->>>>>>> origin/aathifzahir
     });
 
     // For each menu item, associate the uploaded image
@@ -63,11 +44,7 @@ const addRestaurant = async (req, res) => {
     await newRestaurant.save();
     res.status(201).json(newRestaurant);
   } catch (err) {
-<<<<<<< HEAD
-    res.status(500).json({ message: 'Error creating restaurant', err });
-=======
     res.status(500).json({ message: "Error creating restaurant", err });
->>>>>>> origin/aathifzahir
   }
 };
 
@@ -80,12 +57,6 @@ const getNearbyRestaurants = async (req, res) => {
     const nearbyRestaurants = await Restaurant.aggregate([
       {
         $geoNear: {
-<<<<<<< HEAD
-          near: { type: 'Point', coordinates: [parseFloat(longitude), parseFloat(latitude)] },
-          distanceField: 'distance',
-          maxDistance: radius * 1000, // Radius in meters
-          spherical: true,
-=======
           near: {
             type: "Point",
             coordinates: [parseFloat(longitude), parseFloat(latitude)],
@@ -105,28 +76,18 @@ const getNearbyRestaurants = async (req, res) => {
           availability: 1,
           operatingHours: 1, // Explicitly include
           distance: 1, // Include calculated distance
->>>>>>> origin/aathifzahir
         },
       },
     ]);
 
     if (nearbyRestaurants.length === 0) {
-<<<<<<< HEAD
-      return res.status(404).json({ message: 'No nearby restaurants found' });
-=======
       return res.status(404).json({ message: "No nearby restaurants found" });
->>>>>>> origin/aathifzahir
     }
 
     res.status(200).json(nearbyRestaurants);
   } catch (err) {
-<<<<<<< HEAD
-    console.error('Error fetching nearby restaurants:', err);
-    res.status(500).json({ message: 'Error fetching nearby restaurants', err });
-=======
     console.error("Error fetching nearby restaurants:", err);
     res.status(500).json({ message: "Error fetching nearby restaurants", err });
->>>>>>> origin/aathifzahir
   }
 };
 
@@ -140,25 +101,12 @@ const toggleAvailability = async (req, res) => {
   try {
     const restaurant = await Restaurant.findById(id);
     if (!restaurant) {
-<<<<<<< HEAD
-      return res.status(404).json({ message: 'Restaurant not found' });
-=======
       return res.status(404).json({ message: "Restaurant not found" });
->>>>>>> origin/aathifzahir
     }
 
     restaurant.availability = !restaurant.availability; // Toggle availability
     await restaurant.save();
 
-<<<<<<< HEAD
-    res.status(200).json({ message: 'Restaurant availability updated', restaurant });
-  } catch (err) {
-    res.status(500).json({ message: 'Error updating availability', err });
-  }
-};
-
-
-=======
     res
       .status(200)
       .json({ message: "Restaurant availability updated", restaurant });
@@ -167,7 +115,6 @@ const toggleAvailability = async (req, res) => {
   }
 };
 
->>>>>>> origin/aathifzahir
 // Manage menu items (add/update/remove items with images)
 const manageMenu = async (req, res) => {
   const { restaurantId, action, menuItemId, menuItem } = req.body;
@@ -178,11 +125,7 @@ const manageMenu = async (req, res) => {
   try {
     const restaurant = await Restaurant.findById(restaurantId);
     if (!restaurant) {
-<<<<<<< HEAD
-      return res.status(404).json({ message: 'Restaurant not found' });
-=======
       return res.status(404).json({ message: "Restaurant not found" });
->>>>>>> origin/aathifzahir
     }
 
     // Check if an image needs to be added or updated for the menu item
@@ -190,24 +133,6 @@ const manageMenu = async (req, res) => {
       menuItem.image = menuItemImage;
     }
 
-<<<<<<< HEAD
-    if (action === 'add') {
-      restaurant.menu.push(menuItem);
-    } else if (action === 'update') {
-      const index = restaurant.menu.findIndex(item => item._id.toString() === menuItemId);
-      if (index === -1) {
-        return res.status(404).json({ message: 'Menu item not found' });
-      }
-      restaurant.menu[index] = menuItem; // Update the menu item
-    } else if (action === 'remove') {
-      restaurant.menu = restaurant.menu.filter(item => item._id.toString() !== menuItemId); // Remove item
-    }
-
-    await restaurant.save();
-    res.status(200).json({ message: 'Menu updated', restaurant });
-  } catch (err) {
-    res.status(500).json({ message: 'Error managing menu', err });
-=======
     if (action === "add") {
       restaurant.menu.push(menuItem);
     } else if (action === "update") {
@@ -228,7 +153,6 @@ const manageMenu = async (req, res) => {
     res.status(200).json({ message: "Menu updated", restaurant });
   } catch (err) {
     res.status(500).json({ message: "Error managing menu", err });
->>>>>>> origin/aathifzahir
   }
 };
 
@@ -239,24 +163,14 @@ const searchRestaurants = async (req, res) => {
   try {
     const query = {};
 
-<<<<<<< HEAD
-    if (cuisine) query['menu.category'] = cuisine;
-    if (priceRange) query['menu.price'] = { $lte: priceRange };
-    if (rating) query['rating'] = { $gte: rating };
-=======
     if (cuisine) query["menu.category"] = cuisine;
     if (priceRange) query["menu.price"] = { $lte: priceRange };
     if (rating) query["rating"] = { $gte: rating };
->>>>>>> origin/aathifzahir
 
     const restaurants = await Restaurant.find(query);
     res.status(200).json(restaurants);
   } catch (err) {
-<<<<<<< HEAD
-    res.status(500).json({ message: 'Error searching restaurants', err });
-=======
     res.status(500).json({ message: "Error searching restaurants", err });
->>>>>>> origin/aathifzahir
   }
 };
 
@@ -265,10 +179,5 @@ module.exports = {
   getNearbyRestaurants,
   toggleAvailability,
   manageMenu,
-<<<<<<< HEAD
-  searchRestaurants
-};
-=======
   searchRestaurants,
 };
->>>>>>> origin/aathifzahir
