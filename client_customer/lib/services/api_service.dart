@@ -34,7 +34,7 @@ class ApiService {
 
       final response = await http
           .post(
-            Uri.parse('$baseUrl/register'),
+            Uri.parse('$baseUrl/customers/register'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
               'name': name,
