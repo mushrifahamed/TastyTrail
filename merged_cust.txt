@@ -1,0 +1,2231 @@
+
+/* File: main.dart */
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'providers/auth_provider.dart';
+import 'services/auth_service.dart';
+import 'models/user.dart';
+import 'screens/auth/login_screen.dart';
+import 'screens/home/home_screen.dart';
+import 'screens/auth/register_screen.dart';
+import 'theme/app_theme.dart';
+import 'screens/onboarding/onboarding1_screen.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final authService = AuthService();
+  final token = await authService.getToken();
+  final userJson = await authService.getUser();
+  User? initialUser;
+  if (userJson != null) {
+    initialUser = User.fromJson(userJson);
+  }
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create:
+              (_) =>
+                  AuthProvider()
+                    ..setToken(token ?? '')
+                    ..setUser(
+                      initialUser ??
+                          User(id: '', name: '', email: '', role: ''),
+                    ),
+        ),
+      ],
+      child: const MyApp(),
+    ),
+  );
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final isCustomer =
+        authProvider.user != null && authProvider.user!.role == 'customer';
+
+    return MaterialApp(
+      title: 'Food Delivery App',
+      theme: AppTheme.lightTheme,
+      debugShowCheckedModeBanner: false,
+      home:
+          (authProvider.isAuth && isCustomer)
+              ? const HomeScreen()
+              : const Onboarding1Screen(),
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/register': (context) => const RegisterScreen(),
+        '/home': (context) => const HomeScreen(),
+      },
+    );
+  }
+}
+
+
+/* File: models\restaurant.dart */
+class MenuItem {
+  final String name;
+  final String description;
+  final double price;
+  final String image;
+
+  MenuItem({
+    required this.name,
+    required this.description,
+    required this.price,
+    required this.image,
+  });
+
+  factory MenuItem.fromJson(Map<String, dynamic> json) {
+    return MenuItem(
+      name: json['name'] ?? 'No name',
+      description: json['description'] ?? '',
+      price: (json['price'] ?? 0).toDouble(),
+      image: json['image'] ?? '', // Provide default if null
+    );
+  }
+}
+
+class Restaurant {
+  final String id;
+  final String name;
+  final String description;
+  final String coverImage;
+  final List<MenuItem> menu;
+  final bool availability;
+  final OperatingHours? operatingHours; // Nullable
+  final double? distance; // In kilometers
+
+  Restaurant({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.coverImage,
+    required this.menu,
+    required this.availability,
+    this.operatingHours,
+    this.distance,
+  });
+
+  factory Restaurant.fromJson(Map<String, dynamic> json) {
+    return Restaurant(
+      id: json['_id'] ?? '',
+      name: json['name'] ?? 'No name',
+      description: json['description'] ?? '',
+      coverImage: json['coverImage'] ?? '',
+      availability: json['availability'] ?? true,
+      menu:
+          (json['menu'] as List<dynamic>? ?? [])
+              .map((x) => MenuItem.fromJson(x))
+              .toList(),
+      operatingHours:
+          json['operatingHours'] != null
+              ? OperatingHours.fromJson(json['operatingHours'])
+              : null,
+      distance: (json['distance'] ?? 0.0) / 1000, // Convert meters to km
+    );
+  }
+}
+
+class OperatingHours {
+  final String? from;
+  final String? to;
+
+  OperatingHours({this.from, this.to});
+
+  factory OperatingHours.fromJson(Map<String, dynamic> json) {
+    return OperatingHours(
+      from: json['from']?.toString(),
+      to: json['to']?.toString(),
+    );
+  }
+}
+
+
+/* File: models\user.dart */
+class User {
+  final String id;
+  final String name;
+  final String email;
+  final String role;
+  final String? phone;
+  final String? address;
+
+  User({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.role,
+    this.phone,
+    this.address,
+  });
+
+  factory User.fromJson(Map<String, dynamic> json) {
+    return User(
+      id: json['_id'],
+      name: json['name'],
+      email: json['email'],
+      role: json['role'],
+      phone: json['phone'],
+      address: json['address'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      '_id': id,
+      'name': name,
+      'email': email,
+      'role': role,
+      'phone': phone,
+      'address': address,
+    };
+  }
+}
+
+
+/* File: providers\auth_provider.dart */
+import 'package:flutter/foundation.dart';
+import '../models/user.dart';
+
+class AuthProvider with ChangeNotifier {
+  User? _user;
+  String? _token;
+
+  User? get user => _user;
+  String? get token => _token;
+  bool get isAuth => _token != null;
+
+  void setUser(User user) {
+    _user = user;
+    notifyListeners();
+  }
+
+  void setToken(String token) {
+    _token = token;
+    notifyListeners();
+  }
+
+  Future<void> logout() async {
+    _user = null;
+    _token = null;
+    notifyListeners();
+  }
+}
+
+
+/* File: screens\auth\login_screen.dart */
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'dart:convert';
+import '../../services/api_service.dart';
+import '../../services/auth_service.dart';
+import '../../providers/auth_provider.dart';
+import '../home/home_screen.dart';
+import 'register_screen.dart';
+import '../../models/user.dart';
+import '../../theme/app_theme.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({Key? key}) : super(key: key);
+
+  @override
+  _LoginScreenState createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _phoneController = TextEditingController();
+  bool _isLoading = false;
+  String? _errorMessage;
+  bool _obscurePassword = true;
+
+  // Track current login mode (email or phone)
+  bool _isEmailMode = true;
+
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final apiService = ApiService();
+    final authService = AuthService();
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    final result = await apiService.login(
+      email: _isEmailMode ? _emailController.text.trim() : null,
+      phone: !_isEmailMode ? _phoneController.text.trim() : null,
+      password: _passwordController.text.trim(),
+    );
+
+    if (!mounted) return;
+
+    if (result['success'] == true) {
+      final user = User.fromJson(result['user']);
+
+      // Restrict access to only "customer" role
+      if (user.role != 'customer') {
+        setState(() {
+          _errorMessage = 'Only customers are allowed to log in.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      await authService.saveAuthData(
+        result['token'],
+        jsonEncode(user.toJson()),
+      );
+      authProvider.setUser(user);
+      authProvider.setToken(result['token']);
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    } else {
+      setState(() {
+        _errorMessage = result['message'];
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _toggleLoginMode() {
+    setState(() {
+      _isEmailMode = !_isEmailMode;
+      // Clear the error message when switching modes
+      _errorMessage = null;
+    });
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  Widget _label(String text) => Text(
+    text,
+    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+      color: Colors.black,
+      fontWeight: FontWeight.w600,
+    ),
+  );
+
+  Widget _roundedField({
+    required TextEditingController controller,
+    String? hintText,
+    TextInputType? keyboardType,
+    bool obscureText = false,
+    Widget? suffixIcon,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      validator: validator,
+      style: const TextStyle(fontSize: 16),
+      decoration: InputDecoration(
+        hintText: hintText,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 20,
+          horizontal: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: AppColors.primary, width: 2),
+        ),
+        suffixIcon: suffixIcon,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 32),
+                Text(
+                  "Login to your account",
+                  style: theme.textTheme.displayLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 32,
+                    color: Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  "Enter your details to continue",
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 32),
+
+                // Conditionally show either email or phone field
+                if (_isEmailMode) ...[
+                  _label("Email Address"),
+                  const SizedBox(height: 8),
+                  _roundedField(
+                    controller: _emailController,
+                    hintText: "Albertstevano@gmail.com",
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter your email';
+                      }
+                      if (!RegExp(
+                        r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                      ).hasMatch(value)) {
+                        return 'Please enter a valid email';
+                      }
+                      return null;
+                    },
+                  ),
+                ] else ...[
+                  _label("Phone Number"),
+                  const SizedBox(height: 8),
+                  _roundedField(
+                    controller: _phoneController,
+                    hintText: "+94771234567",
+                    keyboardType: TextInputType.phone,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter your phone number';
+                      }
+                      if (!RegExp(r'^\+?[\d\s-]{10,}$').hasMatch(value)) {
+                        return 'Enter a valid phone number (e.g. +94771234567)';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+
+                // Toggle link to switch between email and phone
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _toggleLoginMode,
+                    child: Text(
+                      _isEmailMode
+                          ? "Use phone number instead"
+                          : "Use email instead",
+                      style: TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+                _label("Password"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _passwordController,
+                  hintText: "**********",
+                  obscureText: _obscurePassword,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_off
+                          : Icons.visibility,
+                      color: Colors.grey,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your password';
+                    }
+                    if (value.length < 6) {
+                      return 'Password must be at least 6 characters';
+                    }
+                    return null;
+                  },
+                ),
+                if (_errorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16.0),
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        color: theme.colorScheme.error,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(56),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(32),
+                      ),
+                      textStyle: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 18,
+                      ),
+                    ),
+                    child:
+                        _isLoading
+                            ? const CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            )
+                            : const Text("Login"),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Center(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RegisterScreen(),
+                        ),
+                      );
+                    },
+                    child: RichText(
+                      text: TextSpan(
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: Colors.black,
+                        ),
+                        children: [
+                          const TextSpan(text: "Don't have an account? "),
+                          TextSpan(
+                            text: "Sign Up",
+                            style: TextStyle(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\auth\register_screen.dart */
+import 'package:client_customer/screens/auth/login_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'dart:convert';
+import '../../services/api_service.dart';
+import '../../services/auth_service.dart';
+import '../../providers/auth_provider.dart';
+import '../home/home_screen.dart';
+import '../../models/user.dart';
+import '../../theme/app_theme.dart';
+
+class RegisterScreen extends StatefulWidget {
+  const RegisterScreen({super.key});
+
+  @override
+  State<RegisterScreen> createState() => _RegisterScreenState();
+}
+
+class _RegisterScreenState extends State<RegisterScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _addressController = TextEditingController();
+  bool _isAgree = false;
+  bool _isLoading = false;
+  String? _errorMessage;
+  bool _obscurePassword = true;
+
+  Future<void> _register() async {
+    if (!_formKey.currentState!.validate() || !_isAgree) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final apiService = ApiService();
+    final authService = AuthService();
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    final result = await apiService.register(
+      name: _nameController.text.trim(),
+      email: _emailController.text.trim(),
+      phone: _phoneController.text.trim(),
+      password: _passwordController.text.trim(),
+      address: _addressController.text.trim(),
+    );
+
+    if (!mounted) return;
+
+    if (result['success'] == true) {
+      final user = User.fromJson(result['user']);
+      await authService.saveAuthData(
+        result['token'],
+        jsonEncode(user.toJson()),
+      );
+      authProvider.setUser(user);
+      authProvider.setToken(result['token']);
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    } else {
+      setState(() {
+        _errorMessage = result['message'];
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 32),
+                Text(
+                  "Create your new account",
+                  style: theme.textTheme.displayLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 32,
+                    color: Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  "Create an account to start looking for the food you like",
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 32),
+                _label("Email Address"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _emailController,
+                  hintText: "Albertstevano@gmail.com",
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your email';
+                    }
+                    if (!RegExp(
+                      r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                    ).hasMatch(value)) {
+                      return 'Please enter a valid email';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                _label("User Name"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _nameController,
+                  hintText: "Alber tstevano",
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your name';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                _label("Phone Number"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _phoneController,
+                  hintText: "+94771234567",
+                  keyboardType: TextInputType.phone,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your phone number';
+                    }
+                    if (!RegExp(r'^\+?[\d\s-]{10,}$').hasMatch(value)) {
+                      return 'Enter a valid phone number (e.g. +94771234567)';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                _label("Password"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _passwordController,
+                  hintText: "**********",
+                  obscureText: _obscurePassword,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_off
+                          : Icons.visibility,
+                      color: Colors.grey,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter a password';
+                    }
+                    if (value.length < 6) {
+                      return 'Password must be at least 6 characters';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                _label("Address"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _addressController,
+                  hintText: "123 Main Street, City",
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your address';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _isAgree,
+                      onChanged: (val) {
+                        setState(() {
+                          _isAgree = val ?? false;
+                        });
+                      },
+                      activeColor: AppColors.primary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    Expanded(
+                      child: RichText(
+                        text: TextSpan(
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: Colors.black,
+                          ),
+                          children: [
+                            const TextSpan(text: "I Agree with "),
+                            TextSpan(
+                              text: "Terms of Service",
+                              style: TextStyle(
+                                color: AppColors.secondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const TextSpan(text: " and "),
+                            TextSpan(
+                              text: "Privacy Policy",
+                              style: TextStyle(
+                                color: AppColors.secondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (_errorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        color: theme.colorScheme.error,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: (_isLoading || !_isAgree) ? null : _register,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(56),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(32),
+                      ),
+                      textStyle: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 18,
+                      ),
+                    ),
+                    child:
+                        _isLoading
+                            ? const CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            )
+                            : const Text("Register"),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Center(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const LoginScreen(),
+                        ),
+                      );
+                    },
+                    child: RichText(
+                      text: TextSpan(
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(color: Colors.black),
+                        children: [
+                          const TextSpan(text: "Have an account? "),
+                          TextSpan(
+                            text: "Log in",
+                            style: TextStyle(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _label(String text) => Text(
+    text,
+    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+      color: Colors.black,
+      fontWeight: FontWeight.w600,
+    ),
+  );
+
+  Widget _roundedField({
+    required TextEditingController controller,
+    String? hintText,
+    TextInputType? keyboardType,
+    bool obscureText = false,
+    Widget? suffixIcon,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      validator: validator,
+      style: const TextStyle(fontSize: 16),
+      decoration: InputDecoration(
+        hintText: hintText,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 20,
+          horizontal: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: AppColors.primary, width: 2),
+        ),
+        suffixIcon: suffixIcon,
+      ),
+    );
+  }
+}
+
+
+/* File: screens\home\home_screen.dart */
+import 'package:flutter/material.dart';
+import '../../models/restaurant.dart';
+import '../../services/api_service.dart';
+import '../../theme/app_theme.dart';
+import '../restaurant/restaurant_screen.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  late Future<List<Restaurant>> _restaurantsFuture;
+  final ApiService _apiService = ApiService();
+
+  @override
+  void initState() {
+    super.initState();
+    _restaurantsFuture = _apiService.getNearbyRestaurants(
+      12.9916, // Example latitude
+      77.5946, // Example longitude
+      5, // 5km radius
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: Column(
+        children: [
+          // Top header with Unsplash image background
+          Stack(
+            children: [
+              Container(
+                height: 170,
+                width: double.infinity,
+                decoration: const BoxDecoration(
+                  image: DecorationImage(
+                    image: NetworkImage(
+                      'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80',
+                    ),
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.black.withOpacity(0.3),
+                        Colors.black.withOpacity(0.1),
+                        Colors.transparent,
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                  ),
+                ),
+              ),
+              Container(
+                height: 170,
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(24, 40, 24, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "TastyTrail",
+                      style: Theme.of(
+                        context,
+                      ).textTheme.headlineSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.location_on, color: Colors.white),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            "Flavor Town, Gastronomia",
+                            style: Theme.of(
+                              context,
+                            ).textTheme.titleMedium?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.search, color: Colors.white),
+                          onPressed: () {},
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      "Discover the best restaurants near you!",
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          // Body
+          Expanded(
+            child: FutureBuilder<List<Restaurant>>(
+              future: _restaurantsFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(child: Text('Error: ${snapshot.error}'));
+                }
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const Center(child: Text('No restaurants found'));
+                }
+                final restaurants = snapshot.data!;
+                restaurants.sort(
+                  (a, b) => (a.distance ?? 0).compareTo(b.distance ?? 0),
+                );
+                return ListView.builder(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 16,
+                  ),
+                  itemCount: restaurants.length,
+                  itemBuilder: (context, index) {
+                    final restaurant = restaurants[index];
+                    return _RestaurantCard(
+                      restaurant: restaurant,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder:
+                                (_) => RestaurantDetailScreen(
+                                  restaurant: restaurant,
+                                ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RestaurantCard extends StatelessWidget {
+  final Restaurant restaurant;
+  final VoidCallback onTap;
+
+  const _RestaurantCard({required this.restaurant, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 28),
+        child: Column(
+          children: [
+            // Cover image, full width, curved top
+            ClipRRect(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(28),
+                topRight: Radius.circular(28),
+              ),
+              child: Image.network(
+                restaurant.coverImage,
+                width: double.infinity,
+                height: 170,
+                fit: BoxFit.cover,
+                errorBuilder:
+                    (_, __, ___) => Container(
+                      height: 170,
+                      color: Colors.grey[200],
+                      child: const Icon(Icons.restaurant, size: 40),
+                    ),
+              ),
+            ),
+            // Details tile, full width, curved bottom
+            Container(
+              width: double.infinity,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(28),
+                  bottomRight: Radius.circular(28),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 10,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    restaurant.name,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    restaurant.description,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey[700]),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.location_on,
+                        color: AppColors.primary,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        restaurant.distance != null
+                            ? "${restaurant.distance!.toStringAsFixed(2)} km"
+                            : "N/A",
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Icon(
+                        Icons.access_time,
+                        color: AppColors.primary,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        restaurant.operatingHours != null
+                            ? "${restaurant.operatingHours!.from ?? '??'} - ${restaurant.operatingHours!.to ?? '??'}"
+                            : "Hours N/A",
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\onboarding\onboarding1_screen.dart */
+import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
+import 'onboarding2_screen.dart';
+import '../auth/register_screen.dart';
+
+class Onboarding1Screen extends StatelessWidget {
+  const Onboarding1Screen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/onboarding1_bg.png', // Update to your asset path
+            fit: BoxFit.cover,
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(24, 36, 24, 36),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(36),
+                  topRight: Radius.circular(36),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "We serve incomparable delicacies",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.displayLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 26,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "All the best restaurants with their top menu waiting for you, they can’t wait for your order!!",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withOpacity(0.9),
+                      fontWeight: FontWeight.w400,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dot(true),
+                      const SizedBox(width: 8),
+                      _dot(false),
+                      const SizedBox(width: 8),
+                      _dot(false),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const RegisterScreen(),
+                            ),
+                          );
+                        },
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text(
+                          "Skip",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const Onboarding2Screen(),
+                            ),
+                          );
+                        },
+                        icon: const Text(
+                          "Next",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                        label: const Icon(
+                          Icons.arrow_forward,
+                          color: Colors.white,
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dot(bool isActive) {
+    return Container(
+      width: isActive ? 24 : 12,
+      height: 8,
+      decoration: BoxDecoration(
+        color: isActive ? Colors.white : Colors.white.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\onboarding\onboarding2_screen.dart */
+import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
+import 'onboarding3_screen.dart';
+import '../auth/register_screen.dart';
+
+class Onboarding2Screen extends StatelessWidget {
+  const Onboarding2Screen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/onboarding2_bg.png', // Update to your asset path
+            fit: BoxFit.cover,
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(24, 36, 24, 36),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(36),
+                  topRight: Radius.circular(36),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "We serve incomparable delicacies",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.displayLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 26,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "All the best restaurants with their top menu waiting for you, they can’t wait for your order!!",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withOpacity(0.9),
+                      fontWeight: FontWeight.w400,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dot(false),
+                      const SizedBox(width: 8),
+                      _dot(true),
+                      const SizedBox(width: 8),
+                      _dot(false),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const RegisterScreen(),
+                            ),
+                          );
+                        },
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text(
+                          "Skip",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const Onboarding3Screen(),
+                            ),
+                          );
+                        },
+                        icon: const Text(
+                          "Next",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                        label: const Icon(
+                          Icons.arrow_forward,
+                          color: Colors.white,
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dot(bool isActive) {
+    return Container(
+      width: isActive ? 24 : 12,
+      height: 8,
+      decoration: BoxDecoration(
+        color: isActive ? Colors.white : Colors.white.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\onboarding\onboarding3_screen.dart */
+import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
+import '../auth/register_screen.dart';
+
+class Onboarding3Screen extends StatelessWidget {
+  const Onboarding3Screen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/onboarding3_bg.png', // Update to your asset path
+            fit: BoxFit.cover,
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(24, 36, 24, 36),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(36),
+                  topRight: Radius.circular(36),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "We serve incomparable delicacies",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.displayLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 26,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "All the best restaurants with their top menu waiting for you, they can’t wait for your order!!",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withOpacity(0.9),
+                      fontWeight: FontWeight.w400,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dot(false),
+                      const SizedBox(width: 8),
+                      _dot(false),
+                      const SizedBox(width: 8),
+                      _dot(true),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  // Circular next button
+                  Center(
+                    child: SizedBox(
+                      width: 56,
+                      height: 56,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          CircularProgressIndicator(
+                            value: 1.0,
+                            strokeWidth: 3,
+                            backgroundColor: Colors.white.withOpacity(0.3),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
+                          ),
+                          Material(
+                            color: Colors.white,
+                            shape: const CircleBorder(),
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: () {
+                                Navigator.pushReplacement(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const RegisterScreen(),
+                                  ),
+                                );
+                              },
+                              child: const Padding(
+                                padding: EdgeInsets.all(8.0),
+                                child: Icon(
+                                  Icons.arrow_forward,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Optionally, you can add a skip button here if you want
+                  // Center(
+                  //   child: TextButton(
+                  //     onPressed: () {
+                  //       Navigator.pushReplacement(
+                  //         context,
+                  //         MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                  //       );
+                  //     },
+                  //     style: TextButton.styleFrom(
+                  //       foregroundColor: Colors.white,
+                  //     ),
+                  //     child: const Text(
+                  //       "Skip",
+                  //       style: TextStyle(
+                  //         fontWeight: FontWeight.w600,
+                  //         fontSize: 16,
+                  //       ),
+                  //     ),
+                  //   ),
+                  // ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dot(bool isActive) {
+    return Container(
+      width: isActive ? 24 : 12,
+      height: 8,
+      decoration: BoxDecoration(
+        color: isActive ? Colors.white : Colors.white.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\restaurant\restaurant_screen.dart */
+// New restaurant_detail_screen.dart
+import 'package:flutter/material.dart';
+import '../../models/restaurant.dart';
+import '../../theme/app_theme.dart';
+
+class RestaurantDetailScreen extends StatelessWidget {
+  final Restaurant restaurant;
+
+  const RestaurantDetailScreen({super.key, required this.restaurant});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            expandedHeight: 250,
+            flexibleSpace: FlexibleSpaceBar(
+              background: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.network(
+                    restaurant.coverImage,
+                    fit: BoxFit.cover,
+                    errorBuilder:
+                        (_, __, ___) => Container(
+                          color: Colors.grey[200],
+                          child: const Icon(Icons.restaurant, size: 60),
+                        ),
+                  ),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [Colors.black54, Colors.transparent],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            pinned: true,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.favorite_border),
+                onPressed: () {},
+                color: Colors.white,
+              ),
+            ],
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    restaurant.name,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    restaurant.description,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  Text(
+                    'Menu Items',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => _MenuItemCard(item: restaurant.menu[index]),
+              childCount: restaurant.menu.length,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuItemCard extends StatelessWidget {
+  final MenuItem item;
+
+  const _MenuItemCard({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: const BorderRadius.horizontal(
+              left: Radius.circular(15),
+            ),
+            child: Image.network(
+              item.image,
+              width: 100,
+              height: 100,
+              fit: BoxFit.cover,
+              errorBuilder:
+                  (_, __, ___) => Container(
+                    width: 100,
+                    height: 100,
+                    color: Colors.grey[200],
+                    child: const Icon(Icons.fastfood),
+                  ),
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.description,
+                    style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '\$${item.price.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/* File: services\api_service.dart */
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:client_customer/models/restaurant.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
+
+class ApiService {
+  static const String _userBaseUrl = 'http://127.0.0.1:3000/api/users';
+  static const String _restaurantBaseUrl =
+      'http://127.0.0.1:3001/api/restaurants';
+
+  Future<Map<String, dynamic>> register({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+    required String address,
+  }) async {
+    try {
+      // Validate input parameters first
+      if (email.isEmpty || !email.contains('@')) {
+        return {
+          'success': false,
+          'message': 'Please enter a valid email address',
+          'errorCode': 'invalid_email',
+        };
+      }
+
+      if (password.length < 6) {
+        return {
+          'success': false,
+          'message': 'Password must be at least 6 characters',
+          'errorCode': 'weak_password',
+        };
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$_userBaseUrl/register'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'name': name,
+              'email': email,
+              'phone': phone,
+              'password': password,
+              'address': address,
+              'role': 'customer',
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      // Handle empty or malformed response
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'errorCode': 'empty_response',
+          'statusCode': response.statusCode,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      // Successful registration
+      if (response.statusCode == 201) {
+        return {
+          'success': true,
+          'token': responseData['token'],
+          'user': responseData['data']['user'],
+          'message': 'Registration successful',
+        };
+      }
+
+      // Handle specific error responses from server
+      if (response.statusCode == 400) {
+        return {
+          'success': false,
+          'message': responseData['message'] ?? 'Invalid request data',
+          'errorCode': responseData['errorCode'] ?? 'bad_request',
+          'validationErrors': responseData['errors'],
+          'statusCode': response.statusCode,
+        };
+      }
+
+      if (response.statusCode == 409) {
+        return {
+          'success': false,
+          'message': 'Email already in use',
+          'errorCode': 'email_conflict',
+          'statusCode': response.statusCode,
+        };
+      }
+
+      // Handle other status codes
+      return {
+        'success': false,
+        'message':
+            responseData['message'] ??
+            'Registration failed with status ${response.statusCode}',
+        'errorCode': responseData['errorCode'] ?? 'server_error',
+        'statusCode': response.statusCode,
+      };
+    } on SocketException catch (e) {
+      return {
+        'success': false,
+        'message': 'No internet connection',
+        'errorCode': 'no_connection',
+        'details': e.toString(),
+      };
+    } on TimeoutException catch (e) {
+      return {
+        'success': false,
+        'message': 'Connection timeout',
+        'errorCode': 'timeout',
+        'details': e.toString(),
+      };
+    } on http.ClientException catch (e) {
+      return {
+        'success': false,
+        'message': 'Network error occurred',
+        'errorCode': 'network_error',
+        'details': e.toString(),
+      };
+    } on FormatException catch (e) {
+      return {
+        'success': false,
+        'message': 'Invalid server response format',
+        'errorCode': 'invalid_format',
+        'details': e.toString(),
+      };
+    } catch (e) {
+      debugPrint('Registration error: $e');
+      return {
+        'success': false,
+        'message': 'An unexpected error occurred',
+        'errorCode': 'unknown_error',
+        'details': e.toString(),
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> login({
+    String? email,
+    String? phone,
+    required String password,
+  }) async {
+    try {
+      // Validate at least one identifier is provided
+      if ((email == null || email.isEmpty) &&
+          (phone == null || phone.isEmpty)) {
+        return {
+          'success': false,
+          'message': 'Email or phone required',
+          'errorCode': 'missing_credentials',
+        };
+      }
+
+      final body = <String, dynamic>{'password': password};
+      if (email != null && email.isNotEmpty) body['email'] = email;
+      if (phone != null && phone.isNotEmpty) body['phone'] = phone;
+
+      final response = await http
+          .post(
+            Uri.parse('$_userBaseUrl/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final responseData = jsonDecode(response.body);
+
+      switch (response.statusCode) {
+        case 200:
+          return {
+            'success': true,
+            'token': responseData['token'],
+            'user': responseData['data']['user'],
+          };
+        case 400:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Invalid request',
+            'errorCode': responseData['errorCode'] ?? 'bad_request',
+          };
+        case 401:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Invalid credentials',
+            'errorCode': 'invalid_credentials',
+          };
+        case 403:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Account not active',
+            'errorCode':
+                responseData['details']?.toString() ?? 'inactive_account',
+          };
+        default:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Login failed',
+            'statusCode': response.statusCode,
+          };
+      }
+    } on SocketException {
+      return {'success': false, 'message': 'No internet connection'};
+    } on TimeoutException {
+      return {'success': false, 'message': 'Connection timeout'};
+    } on http.ClientException catch (e) {
+      return {'success': false, 'message': 'Network error: ${e.message}'};
+    } catch (e) {
+      debugPrint('Login error: $e');
+      return {'success': false, 'message': 'An unexpected error occurred'};
+    }
+  }
+
+  Future<Map<String, dynamic>> getProfile(String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_userBaseUrl/me'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'user': responseData['data']['user']};
+      } else {
+        return {
+          'success': false,
+          'message': responseData['message'] ?? 'Failed to fetch profile',
+        };
+      }
+    } catch (e) {
+      debugPrint('Profile error: $e');
+      return {
+        'success': false,
+        'message': 'An error occurred while fetching profile',
+      };
+    }
+  }
+
+  Future<List<Restaurant>> getNearbyRestaurants(
+    double lat,
+    double lon,
+    int radius,
+  ) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_restaurantBaseUrl/nearby').replace(
+          queryParameters: {
+            'latitude': lat.toString(),
+            'longitude': lon.toString(),
+            'radius': radius.toString(),
+          },
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        List<dynamic> data = jsonDecode(response.body);
+        return data.map((json) => Restaurant.fromJson(json)).toList();
+      }
+      throw Exception('Failed to load restaurants');
+    } catch (e) {
+      throw Exception('Restaurant API error: $e');
+    }
+  }
+
+  Future<Restaurant> getRestaurantDetails(String restaurantId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_restaurantBaseUrl/$restaurantId'),
+      );
+
+      if (response.statusCode == 200) {
+        return Restaurant.fromJson(jsonDecode(response.body));
+      }
+      throw Exception('Failed to load restaurant details');
+    } catch (e) {
+      throw Exception('Restaurant details error: $e');
+    }
+  }
+}
+
+
+/* File: services\auth_service.dart */
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+
+class AuthService {
+  static const String _tokenKey = 'auth_token';
+  static const String _userKey = 'auth_user';
+
+  Future<bool> saveAuthData(String token, String userJson) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_tokenKey, token);
+      await prefs.setString(_userKey, userJson);
+      return true;
+    } catch (e) {
+      debugPrint('Error saving auth data: $e');
+      return false;
+    }
+  }
+
+  Future<String?> getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_tokenKey);
+  }
+
+  Future<Map<String, dynamic>?> getUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userJson = prefs.getString(_userKey);
+    if (userJson != null) {
+      return Map<String, dynamic>.from(jsonDecode(userJson));
+    }
+    return null;
+  }
+
+  Future<bool> clearAuthData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_tokenKey);
+      await prefs.remove(_userKey);
+      return true;
+    } catch (e) {
+      debugPrint('Error clearing auth data: $e');
+      return false;
+    }
+  }
+}
+
+
+/* File: theme\app_theme.dart */
+import 'package:flutter/material.dart';
+
+class AppColors {
+  static const primary = Color(0xFFFFA000); // Orange for buttons and highlights
+  static const secondary = Color(0xFF4F46E5); // Purple (optional)
+  static const background = Color(0xFFFFFFFF);
+  static const error = Color(0xFFEF4444);
+  static const text = Color(0xFF111827);
+  static const muted = Color(0xFF6B7280);
+  static const border = Color(0xFFE5E7EB);
+}
+
+class AppTheme {
+  static ThemeData get lightTheme {
+    return ThemeData(
+      fontFamily: 'InterVariable',
+      scaffoldBackgroundColor: AppColors.background,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColors.primary,
+        brightness: Brightness.light,
+      ),
+      textTheme: const TextTheme(
+        displayLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.w700),
+        titleLarge: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+        bodyMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w400),
+        labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: AppColors.background,
+        foregroundColor: AppColors.text,
+        elevation: 0,
+        titleTextStyle: TextStyle(
+          fontFamily: 'InterVariable',
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: AppColors.text,
+        ),
+      ),
+      inputDecorationTheme: const InputDecorationTheme(
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderSide: BorderSide(color: AppColors.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderSide: BorderSide(color: AppColors.primary, width: 2),
+        ),
+        labelStyle: TextStyle(fontFamily: 'InterVariable'),
+        contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(56),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(32),
+          ),
+          textStyle: const TextStyle(
+            fontFamily: 'InterVariable',
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
+          ),
+        ),
+      ),
+      checkboxTheme: CheckboxThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        fillColor: MaterialStateProperty.all(AppColors.primary),
+      ),
+    );
+  }
+}
+
