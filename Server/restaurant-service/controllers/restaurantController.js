@@ -91,10 +91,6 @@ const getNearbyRestaurants = async (req, res) => {
   }
 };
 
-module.exports = {
-  getNearbyRestaurants,
-};
-
 // Update restaurant availability
 const toggleAvailability = async (req, res) => {
   const { id } = req.params;
@@ -113,6 +109,40 @@ const toggleAvailability = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: "Error updating availability", err });
   }
+};
+
+// Get restaurant availability status
+const getRestaurantAvailability = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const restaurant = await Restaurant.findById(id);
+
+    if (!restaurant) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    res.status(200).json({
+      restaurantId: restaurant._id,
+      isAvailable: restaurant.availability,
+    });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ message: "Error checking restaurant availability", err });
+  }
+};
+
+// Get restaurant by ID
+const getRestaurantById = async (req, res) => {
+  try {
+    const restaurant = await Restaurant.findById(req.params.id);
+    if (!restaurant) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+    res.status(200).json(restaurant);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching restaurant", err });
+  }
 };
 
 // Manage menu items (add/update/remove items with images)
@@ -210,8 +240,11 @@ module.exports = {
   addRestaurant,
   getNearbyRestaurants,
   toggleAvailability,
+  getRestaurantAvailability,
+  getRestaurantById,
   manageMenu,
   searchRestaurants,
   getRestaurantAvailability,
   getRestaurantById,
 };
+
