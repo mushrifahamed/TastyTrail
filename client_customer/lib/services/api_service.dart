@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:client_customer/models/restaurant.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://127.0.0.1:3000/api/users';
+  static const String _userBaseUrl = 'http://127.0.0.1:3000/api/users';
+  static const String _restaurantBaseUrl =
+      'http://127.0.0.1:3001/api/restaurants';
 
   Future<Map<String, dynamic>> register({
     required String name,
@@ -34,7 +37,7 @@ class ApiService {
 
       final response = await http
           .post(
-            Uri.parse('$baseUrl/register'),
+            Uri.parse('$_userBaseUrl/register'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
               'name': name,
@@ -159,7 +162,7 @@ class ApiService {
 
       final response = await http
           .post(
-            Uri.parse('$baseUrl/login'),
+            Uri.parse('$_userBaseUrl/login'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(body),
           )
@@ -215,7 +218,7 @@ class ApiService {
   Future<Map<String, dynamic>> getProfile(String token) async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/me'),
+        Uri.parse('$_userBaseUrl/me'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -238,6 +241,47 @@ class ApiService {
         'success': false,
         'message': 'An error occurred while fetching profile',
       };
+    }
+  }
+
+  Future<List<Restaurant>> getNearbyRestaurants(
+    double lat,
+    double lon,
+    int radius,
+  ) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_restaurantBaseUrl/nearby').replace(
+          queryParameters: {
+            'latitude': lat.toString(),
+            'longitude': lon.toString(),
+            'radius': radius.toString(),
+          },
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        List<dynamic> data = jsonDecode(response.body);
+        return data.map((json) => Restaurant.fromJson(json)).toList();
+      }
+      throw Exception('Failed to load restaurants');
+    } catch (e) {
+      throw Exception('Restaurant API error: $e');
+    }
+  }
+
+  Future<Restaurant> getRestaurantDetails(String restaurantId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_restaurantBaseUrl/$restaurantId'),
+      );
+
+      if (response.statusCode == 200) {
+        return Restaurant.fromJson(jsonDecode(response.body));
+      }
+      throw Exception('Failed to load restaurant details');
+    } catch (e) {
+      throw Exception('Restaurant details error: $e');
     }
   }
 }

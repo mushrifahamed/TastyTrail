@@ -1,17 +1,25 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const restaurantController = require('../controllers/restaurantController');
-const verifyToken = require('../middleware/authMiddleware');
-const upload = require('../config/multerConfig');
+const restaurantController = require("../controllers/restaurantController");
+const verifyToken = require("../middleware/authMiddleware");
+const upload = require("../config/multerConfig");
 
 // Add a new restaurant should have verifyToken
-router.post('/', upload.single('coverImage'), upload.array('menuItemImages'), restaurantController.addRestaurant);
+router.post(
+  "/",
+  upload.single("coverImage"),
+  upload.array("menuItemImages"),
+  restaurantController.addRestaurant
+);
+
+// get by id
+router.get("/:id", restaurantController.getRestaurantById);
 
 // Get nearby restaurants
-router.get('/nearby', restaurantController.getNearbyRestaurants);
+router.get("/nearby", restaurantController.getNearbyRestaurants);
 
 // Update restaurant availability should have verifyToken
-router.put('/:id/availability', restaurantController.toggleAvailability);
+router.put("/:id/availability", restaurantController.toggleAvailability);
 
 // check availability
 router.get("/:id/availability", restaurantController.getRestaurantAvailability);
@@ -20,9 +28,16 @@ router.get("/:id/availability", restaurantController.getRestaurantAvailability);
 router.get("/:id", restaurantController.getRestaurantById);
 
 // Manage menu (add/update/remove items) shoul have verify token
-router.put('/:id/menu', upload.single('menuItemImage'), restaurantController.manageMenu);
+router.put(
+  "/:id/menu",
+  upload.single("menuItemImage"),
+  restaurantController.manageMenu
+);
 
 // search restaurants
-router.get('/search', restaurantController.searchRestaurants);
+router.get("/search", restaurantController.searchRestaurants);
+
+// check availability
+router.get("/:id/availability", restaurantController.getRestaurantAvailability);
 
 module.exports = router;
