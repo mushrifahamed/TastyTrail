@@ -1,4 +1,9 @@
+import 'dart:convert';
+
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'providers/auth_provider.dart';
@@ -12,6 +17,24 @@ import 'screens/onboarding/onboarding1_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(); // Ensure firebase is initialized
+
+  Future<void> testRegisterToken(String userId) async {
+  final fcmToken = await FirebaseMessaging.instance.getToken();
+  if (fcmToken != null) {
+    await http.post(
+      Uri.parse('http://10.0.2.2:5000/api/notifications/register'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'token': fcmToken,
+        'role': 'customer',
+      }),
+    );
+    print("✅ Token registered: $fcmToken");
+  }
+}
 
   final authService = AuthService();
   final token = await authService.getToken();
