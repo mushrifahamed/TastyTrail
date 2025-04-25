@@ -34,5 +34,5 @@ def merge_js_files(source_folder, output_file):
 
 # Example usage
 source_folder = "./server/user-service"  # Replace with your source folder if needed
-output_file = "merged_output.txt"  # Replace with your desired output file if needed
+output_file = "merged_user.txt"  # Replace with your desired output file if needed
 merge_js_files(source_folder, output_file)

@@ -1,4 +1,3 @@
-// src/routes/orderRoutes.js
 const express = require("express");
 const router = express.Router();
 const {
@@ -7,6 +6,10 @@ const {
   updateSubOrderStatus,
   getCustomerOrders,
   getRestaurantOrders,
+  updateOrderStatus,
+  getDeliveryPersonOrders,
+  getDeliveryOrder,
+  updateOrderPaymentStatus,
 } = require("../controllers/orderController");
 const authMiddleware = require("../utils/authMiddleware");
 
@@ -35,11 +38,36 @@ router.get(
   getRestaurantOrders
 );
 
+// Order tracking routes
+router.patch(
+  "/:orderId/status",
+  authMiddleware(["restaurant_admin", "delivery_personnel"]),
+  updateOrderStatus
+);
+
 // Delivery personnel routes
 router.patch(
   "/suborders/:subOrderId/status",
   authMiddleware(["delivery_personnel"]),
   updateSubOrderStatus
+);
+
+router.get(
+  "/delivery/assigned",
+  authMiddleware(["delivery_personnel"]),
+  getDeliveryPersonOrders
+);
+
+router.get(
+  "/delivery/order/:id",
+  authMiddleware(["delivery_personnel"]),
+  getDeliveryOrder
+);
+
+router.post(
+  "/:orderId/payment-update",
+  authMiddleware(["internal_service"]),
+  updateOrderPaymentStatus
 );
 
 module.exports = router;
