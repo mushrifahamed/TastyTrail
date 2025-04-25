@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { userServiceApi } from "../utils/api";
+import { userServiceApi, restaurantServiceApi } from "../utils/api";
 import { toast } from "react-toastify";
 
 const RestaurantAdminAssignment = ({ restaurantId, onClose }) => {
@@ -13,20 +13,30 @@ const RestaurantAdminAssignment = ({ restaurantId, onClose }) => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [restaurantInfo, setRestaurantInfo] = useState(null);
 
+  // Fetch restaurant info and admins
   useEffect(() => {
-    const fetchAdmins = async () => {
+    const fetchData = async () => {
       try {
-        const response = await userServiceApi.get(
+        // Fetch restaurant info
+        const restaurantResponse = await restaurantServiceApi.get(
+          `/api/restaurants/${restaurantId}`
+        );
+        setRestaurantInfo(restaurantResponse.data.data.restaurant);
+
+        // Fetch admins
+        const adminsResponse = await userServiceApi.get(
           `/api/users/restaurant/${restaurantId}/admins`
         );
-        setAdmins(response.data.data.admins);
+        setAdmins(adminsResponse.data.data.admins);
       } catch (err) {
-        setError("Failed to fetch admins");
+        setError("Failed to fetch data");
+        console.error("Fetch error:", err);
       }
     };
     
-    fetchAdmins();
+    fetchData();
   }, [restaurantId]);
 
   const handleInputChange = (e) => {
@@ -40,17 +50,14 @@ const RestaurantAdminAssignment = ({ restaurantId, onClose }) => {
   const handleCreateAdmin = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
     
     try {
-      const response = await userServiceApi.post("/api/users/restaurant-admin",
+      const response = await userServiceApi.post(
+        "/api/users/restaurant-admin",
         {
           ...newAdmin,
           password: newAdmin.password || generateRandomPassword()
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`
-          }
         }
       );
 
@@ -64,9 +71,25 @@ const RestaurantAdminAssignment = ({ restaurantId, onClose }) => {
       });
       toast.success("Restaurant admin created successfully");
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to create admin");
+      const errorMsg = err.response?.data?.message || "Failed to create admin";
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRemoveAdmin = async (adminId) => {
+    if (!window.confirm("Are you sure you want to remove this admin?")) return;
+    
+    try {
+      await userServiceApi.delete(`/api/users/restaurant-admin/${adminId}`);
+      setAdmins(prev => prev.filter(admin => admin._id !== adminId));
+      toast.success("Admin removed successfully");
+    } catch (err) {
+      const errorMsg = err.response?.data?.message || "Failed to remove admin";
+      setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -78,7 +101,14 @@ const RestaurantAdminAssignment = ({ restaurantId, onClose }) => {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white p-6 rounded-lg w-full max-w-2xl max-h-screen overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold">Manage Restaurant Admins</h2>
+          <div>
+            <h2 className="text-xl font-bold">Manage Restaurant Admins</h2>
+            {restaurantInfo && (
+              <p className="text-sm text-gray-600">
+                Restaurant: {restaurantInfo.name}
+              </p>
+            )}
+          </div>
           <button 
             onClick={onClose}
             className="text-gray-500 hover:text-gray-700 text-2xl"
@@ -210,7 +240,10 @@ const RestaurantAdminAssignment = ({ restaurantId, onClose }) => {
                         {admin.phone}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <button className="text-red-600 hover:text-red-900">
+                        <button 
+                          onClick={() => handleRemoveAdmin(admin._id)}
+                          className="text-red-600 hover:text-red-900"
+                        >
                           Remove
                         </button>
                       </td>
