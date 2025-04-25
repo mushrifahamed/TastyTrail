@@ -8,6 +8,36 @@ const notificationService = require("../services/notificationService");
 const estimationService = require("../services/estimationService");
 const userService = require("../services/userService");
 const { RESTAURANT_SERVICE_URL } = process.env;
+const amqp = require('amqplib/callback_api');
+
+
+// Function to publish an event to RabbitMQ
+// Function to publish the order created event to RabbitMQ
+const publishOrderCreatedEvent = (orderId) => {
+  amqp.connect('amqp://localhost', (error, connection) => {
+    if (error) {
+      throw error;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        throw error;
+      }
+
+      const queue = 'order_created_queue';  // Queue name where delivery service listens
+      const msg = JSON.stringify({ orderId });  // Message payload (only orderId)
+
+      channel.assertQueue(queue, { durable: true });
+      channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
+
+      console.log(`Order Created Event Sent: ${msg}`);
+    });
+
+    setTimeout(() => {
+      connection.close();
+    }, 500);
+  });
+};
 
 // Create a new order with items from a single restaurant
 const createOrder = async (req, res, next) => {
@@ -116,6 +146,9 @@ const createOrder = async (req, res, next) => {
       savedOrder.paymentId = paymentResponse.paymentId;
       await savedOrder.save();
     }
+
+    // Publish the order created event to RabbitMQ after the order is created
+    publishOrderCreatedEvent(savedOrder._id);
 
     res.status(201).json(savedOrder);
   } catch (error) {

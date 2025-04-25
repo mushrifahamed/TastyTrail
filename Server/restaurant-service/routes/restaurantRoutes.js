@@ -21,6 +21,12 @@ router.get("/:id", restaurantController.getRestaurantById);
 // Update restaurant availability should have verifyToken
 router.put("/:id/availability", restaurantController.toggleAvailability);
 
+// check availability
+router.get("/:id/availability", restaurantController.getRestaurantAvailability);
+
+// get by id
+router.get("/:id", restaurantController.getRestaurantById);
+
 // Manage menu (add/update/remove items) shoul have verify token
 router.put(
   "/:id/menu",
