@@ -1,10 +1,12 @@
 class MenuItem {
+  final String id;
   final String name;
   final String description;
   final double price;
   final String image;
 
   MenuItem({
+    required this.id,
     required this.name,
     required this.description,
     required this.price,
@@ -13,10 +15,11 @@ class MenuItem {
 
   factory MenuItem.fromJson(Map<String, dynamic> json) {
     return MenuItem(
+      id: json['_id'] ?? '',
       name: json['name'] ?? 'No name',
       description: json['description'] ?? '',
       price: (json['price'] ?? 0).toDouble(),
-      image: json['image'] ?? '', // Provide default if null
+      image: json['image'] ?? '',
     );
   }
 }

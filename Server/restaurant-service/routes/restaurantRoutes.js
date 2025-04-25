@@ -12,11 +12,11 @@ router.post(
   restaurantController.addRestaurant
 );
 
-// get by id
-router.get("/:id", restaurantController.getRestaurantById);
-
 // Get nearby restaurants
 router.get("/nearby", restaurantController.getNearbyRestaurants);
+
+// get by id
+router.get("/:id", restaurantController.getRestaurantById);
 
 // Update restaurant availability should have verifyToken
 router.put("/:id/availability", restaurantController.toggleAvailability);
