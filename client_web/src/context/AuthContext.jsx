@@ -1,6 +1,6 @@
 import { createContext, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import api from "../utils/api";
+import { userServiceApi } from "../utils/api"; // Updated import to use userServiceApi
 
 export const AuthContext = createContext();
 
@@ -15,7 +15,7 @@ export const AuthProvider = ({ children }) => {
         const token = localStorage.getItem("token");
         console.log("Auth provider Token:", token);
         if (token) {
-          const response = await api.get("/api/users/me");
+          const response = await userServiceApi.get("/api/users/me"); // Changed to use userServiceApi
           console.log("Auth check response:", response);
           if (response.status === 401 || response.status === 404) {
             logout();
@@ -39,7 +39,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (credentials) => {
     try {
-      const response = await api.post("/api/users/login", credentials);
+      const response = await userServiceApi.post("/api/users/login", credentials); // Changed to use userServiceApi
 
       // Check for error in response body
       if (response.data.error) {

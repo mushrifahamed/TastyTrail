@@ -33,6 +33,6 @@ def merge_js_files(source_folder, output_file):
                     outfile.write('\n')
 
 # Example usage
-source_folder = "./server/user-service"  # Replace with your source folder if needed
+source_folder = "./server/restaurant-service"  # Replace with your source folder if needed
 output_file = "merged_output.txt"  # Replace with your desired output file if needed
 merge_js_files(source_folder, output_file)

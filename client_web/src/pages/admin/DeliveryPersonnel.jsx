@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import api from "../../utils/api";
+import { userServiceApi } from "../../utils/api"; // Import userServiceApi
 import { AuthContext } from "../../context/AuthContext";
 
 const AdminDeliveryPersonnel = () => {
@@ -11,7 +11,7 @@ const AdminDeliveryPersonnel = () => {
   useEffect(() => {
     const fetchDeliveryPersons = async () => {
       try {
-        const response = await api.get("/api/users?role=delivery_personnel");
+        const response = await userServiceApi.get("/api/users?role=delivery_personnel"); // Use userServiceApi
         setDeliveryPersons(response.data.users);
       } catch (err) {
         setError(
@@ -27,7 +27,7 @@ const AdminDeliveryPersonnel = () => {
 
   const approveDeliveryPerson = async (userId) => {
     try {
-      await api.patch("/api/users/delivery/approve", { userId });
+      await userServiceApi.patch("/api/users/delivery/approve", { userId }); // Use userServiceApi
       setDeliveryPersons(
         deliveryPersons.map((person) =>
           person._id === userId

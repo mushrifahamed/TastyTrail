@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import api from "../../utils/api";
+import {userServiceApi, restaurantServiceApi} from "../../utils/api";
 
 const RestaurantAdminRequest = () => {
   const [formData, setFormData] = useState({
@@ -29,7 +29,7 @@ const RestaurantAdminRequest = () => {
     setError(null);
 
     try {
-      await api.post("/api/users/restaurant-admin/request", formData);
+      await userServiceApi.post("/api/users/restaurant-admin/request", formData);
       setSuccess(true);
       setTimeout(() => navigate("/login"), 3000);
     } catch (err) {
