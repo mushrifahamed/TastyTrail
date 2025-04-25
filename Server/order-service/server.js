@@ -4,6 +4,7 @@ const cors = require("cors");
 const morgan = require("morgan");
 const connectDB = require("./config/db");
 const orderRoutes = require("./routes/orderRoutes");
+const cartRoutes = require("./routes/cartRoutes");
 const errorHandler = require("./utils/errorHandler");
 require("dotenv").config();
 
@@ -19,6 +20,7 @@ connectDB();
 
 // Routes
 app.use("/api/orders", orderRoutes);
+app.use("/api/cart", cartRoutes);
 
 // Error handling middleware
 app.use(errorHandler);

@@ -1,0 +1,4398 @@
+
+/* File: main.dart */
+// lib/main.dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'providers/auth_provider.dart';
+import 'providers/cart_provider.dart';
+import 'providers/restaurant_provider.dart';
+import 'services/auth_service.dart';
+import 'models/user.dart';
+import 'screens/auth/login_screen.dart';
+import 'screens/home/home_screen.dart';
+import 'screens/auth/register_screen.dart';
+import 'screens/cart/cart_screen.dart';
+import 'theme/app_theme.dart';
+import 'screens/onboarding/onboarding1_screen.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final authService = AuthService();
+  final token = await authService.getToken();
+  final userJson = await authService.getUser();
+  User? initialUser;
+  if (userJson != null) {
+    initialUser = User.fromJson(userJson);
+  }
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create:
+              (_) =>
+                  AuthProvider()
+                    ..setToken(token ?? '')
+                    ..setUser(
+                      initialUser ??
+                          User(id: '', name: '', email: '', role: ''),
+                    ),
+        ),
+        ChangeNotifierProvider(create: (_) => CartProvider()),
+        ChangeNotifierProvider(create: (_) => RestaurantProvider()),
+      ],
+      child: const MyApp(),
+    ),
+  );
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ScreenUtilInit(
+      designSize: const Size(360, 690),
+      builder: (context, child) {
+        return MaterialApp(
+          title: 'Food Delivery App',
+          theme: AppTheme.lightTheme,
+          debugShowCheckedModeBanner: false,
+          home: Consumer<AuthProvider>(
+            builder: (context, authProvider, _) {
+              final isCustomer =
+                  authProvider.user != null &&
+                  authProvider.user!.role == 'customer';
+              return (authProvider.isAuth && isCustomer)
+                  ? const HomeScreen()
+                  : const Onboarding1Screen();
+            },
+          ),
+          routes: {
+            '/login': (context) => const LoginScreen(),
+            '/register': (context) => const RegisterScreen(),
+            '/home': (context) => const HomeScreen(),
+            '/cart': (context) => const CartScreen(),
+          },
+        );
+      },
+    );
+  }
+}
+
+
+/* File: models\cart.dart */
+class CartItem {
+  final String id;
+  final String restaurantId;
+  final String menuItemId;
+  final String name;
+  final double price;
+  int quantity;
+
+  CartItem({
+    required this.id,
+    required this.restaurantId,
+    required this.menuItemId,
+    required this.name,
+    required this.price,
+    required this.quantity,
+  });
+
+  factory CartItem.fromJson(Map<String, dynamic> json) {
+    return CartItem(
+      id: json['_id'] ?? '',
+      restaurantId: json['restaurantId'] ?? '',
+      menuItemId: json['menuItemId'] ?? '',
+      name: json['name'] ?? '',
+      price: (json['price'] ?? 0).toDouble(),
+      quantity: json['quantity'] ?? 1,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'restaurantId': restaurantId,
+      'menuItemId': menuItemId,
+      'name': name,
+      'price': price,
+      'quantity': quantity,
+    };
+  }
+}
+
+class Cart {
+  final String customerId;
+  final List<CartItem> items;
+  final DateTime updatedAt;
+
+  Cart({
+    required this.customerId,
+    required this.items,
+    required this.updatedAt,
+  });
+
+  factory Cart.fromJson(Map<String, dynamic> json) {
+    return Cart(
+      customerId: json['customerId'] ?? '',
+      items:
+          (json['items'] as List<dynamic>? ?? [])
+              .map((item) => CartItem.fromJson(item))
+              .toList(),
+      updatedAt:
+          json['updatedAt'] != null
+              ? DateTime.parse(json['updatedAt'])
+              : DateTime.now(),
+    );
+  }
+
+  double get totalAmount {
+    return items.fold(0, (sum, item) => sum + (item.price * item.quantity));
+  }
+}
+
+
+/* File: models\restaurant.dart */
+class MenuItem {
+  final String id;
+  final String name;
+  final String description;
+  final double price;
+  final String image;
+
+  MenuItem({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.price,
+    required this.image,
+  });
+
+  factory MenuItem.fromJson(Map<String, dynamic> json) {
+    return MenuItem(
+      id: json['_id'] ?? '',
+      name: json['name'] ?? 'No name',
+      description: json['description'] ?? '',
+      price: (json['price'] ?? 0).toDouble(),
+      image: json['image'] ?? '',
+    );
+  }
+}
+
+class Restaurant {
+  final String id;
+  final String name;
+  final String description;
+  final String coverImage;
+  final List<MenuItem> menu;
+  final bool availability;
+  final OperatingHours? operatingHours; // Nullable
+  final double? distance; // In kilometers
+
+  Restaurant({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.coverImage,
+    required this.menu,
+    required this.availability,
+    this.operatingHours,
+    this.distance,
+  });
+
+  factory Restaurant.fromJson(Map<String, dynamic> json) {
+    return Restaurant(
+      id: json['_id'] ?? '',
+      name: json['name'] ?? 'No name',
+      description: json['description'] ?? '',
+      coverImage: json['coverImage'] ?? '',
+      availability: json['availability'] ?? true,
+      menu:
+          (json['menu'] as List<dynamic>? ?? [])
+              .map((x) => MenuItem.fromJson(x))
+              .toList(),
+      operatingHours:
+          json['operatingHours'] != null
+              ? OperatingHours.fromJson(json['operatingHours'])
+              : null,
+      distance: (json['distance'] ?? 0.0) / 1000, // Convert meters to km
+    );
+  }
+}
+
+class OperatingHours {
+  final String? from;
+  final String? to;
+
+  OperatingHours({this.from, this.to});
+
+  factory OperatingHours.fromJson(Map<String, dynamic> json) {
+    return OperatingHours(
+      from: json['from']?.toString(),
+      to: json['to']?.toString(),
+    );
+  }
+}
+
+
+/* File: models\user.dart */
+class User {
+  final String id;
+  final String name;
+  final String email;
+  final String role;
+  final String? phone;
+  final String? address;
+
+  User({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.role,
+    this.phone,
+    this.address,
+  });
+
+  factory User.fromJson(Map<String, dynamic> json) {
+    return User(
+      id: json['_id'],
+      name: json['name'],
+      email: json['email'],
+      role: json['role'],
+      phone: json['phone'],
+      address: json['address'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      '_id': id,
+      'name': name,
+      'email': email,
+      'role': role,
+      'phone': phone,
+      'address': address,
+    };
+  }
+}
+
+
+/* File: providers\auth_provider.dart */
+import 'package:flutter/foundation.dart';
+import '../models/user.dart';
+
+class AuthProvider with ChangeNotifier {
+  User? _user;
+  String? _token;
+
+  User? get user => _user;
+  String? get token => _token;
+  bool get isAuth => _token != null;
+
+  void setUser(User user) {
+    _user = user;
+    notifyListeners();
+  }
+
+  void setToken(String token) {
+    _token = token;
+    notifyListeners();
+  }
+
+  Future<void> logout() async {
+    _user = null;
+    _token = null;
+    notifyListeners();
+  }
+}
+
+
+/* File: providers\cart_provider.dart */
+import 'package:flutter/foundation.dart';
+import '../models/cart.dart';
+import '../models/restaurant.dart';
+import '../services/cart_service.dart';
+
+class CartProvider with ChangeNotifier {
+  Cart? _cart;
+  bool _isLoading = false;
+  String? _error;
+  final CartService _cartService = CartService();
+
+  Cart? get cart => _cart;
+  bool get isLoading => _isLoading;
+  String? get error => _error;
+  int get itemCount => _cart?.items.length ?? 0;
+  double get totalAmount => _cart?.totalAmount ?? 0.0;
+
+  Future<void> fetchCart() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final result = await _cartService.getCart();
+      if (result['success']) {
+        _cart = Cart.fromJson(result['data']);
+      } else {
+        _error = result['message'];
+      }
+    } catch (e) {
+      _error = 'Failed to load cart: $e';
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<Map<String, dynamic>> addToCart(
+    MenuItem menuItem,
+    String restaurantId,
+    int quantity,
+  ) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final result = await _cartService.addToCart(
+        restaurantId: restaurantId,
+        menuItemId: menuItem.id,
+        name: menuItem.name,
+        price: menuItem.price,
+        quantity: quantity,
+      );
+
+      if (result['success']) {
+        _cart = Cart.fromJson(result['data']);
+        return {'success': true};
+      } else {
+        _error = result['message'];
+        return {'success': false, 'message': result['message']};
+      }
+    } catch (e) {
+      _error = 'Failed to add item to cart: $e';
+      return {'success': false, 'message': _error};
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateCartItem(String itemId, int quantity) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final result = await _cartService.updateCartItem(itemId, quantity);
+      if (result['success']) {
+        _cart = Cart.fromJson(result['data']);
+      } else {
+        _error = result['message'];
+      }
+    } catch (e) {
+      _error = 'Failed to update cart item: $e';
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> removeFromCart(String itemId) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final result = await _cartService.removeFromCart(itemId);
+      if (result['success']) {
+        _cart = Cart.fromJson(result['data']);
+      } else {
+        _error = result['message'];
+      }
+    } catch (e) {
+      _error = 'Failed to remove item from cart: $e';
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> clearCart() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final result = await _cartService.clearCart();
+      if (result['success']) {
+        _cart = Cart.fromJson(result['data']);
+      } else {
+        _error = result['message'];
+      }
+    } catch (e) {
+      _error = 'Failed to clear cart: $e';
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<Map<String, dynamic>> checkout(
+    String deliveryAddress,
+    Map<String, double> deliveryLocation,
+  ) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final result = await _cartService.checkout(
+        deliveryAddress,
+        deliveryLocation,
+      );
+      if (result['success']) {
+        _cart = Cart.fromJson({
+          'customerId': _cart?.customerId ?? '',
+          'items': [],
+        });
+        return {'success': true, 'data': result['data']};
+      } else {
+        _error = result['message'];
+        return {'success': false, 'message': result['message']};
+      }
+    } catch (e) {
+      _error = 'Failed to checkout: $e';
+      return {'success': false, 'message': _error};
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+}
+
+
+/* File: providers\restaurant_provider.dart */
+// lib/providers/restaurant_provider.dart
+import 'package:flutter/material.dart';
+import '../models/restaurant.dart';
+import '../services/restaurant_service.dart';
+
+enum RestaurantLoadingStatus { initial, loading, loaded, error }
+
+class RestaurantProvider with ChangeNotifier {
+  final RestaurantService _restaurantService = RestaurantService();
+
+  List<Restaurant> _restaurants = [];
+  Restaurant? _selectedRestaurant;
+  RestaurantLoadingStatus _status = RestaurantLoadingStatus.initial;
+  String? _errorMessage;
+
+  List<Restaurant> get restaurants => _restaurants;
+  Restaurant? get selectedRestaurant => _selectedRestaurant;
+  RestaurantLoadingStatus get status => _status;
+  String? get errorMessage => _errorMessage;
+  bool get isLoading => _status == RestaurantLoadingStatus.loading;
+
+  Future<void> fetchNearbyRestaurants({
+    required double latitude,
+    required double longitude,
+    required double radius,
+  }) async {
+    _status = RestaurantLoadingStatus.loading;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      _restaurants = await _restaurantService.getNearbyRestaurants(
+        latitude: latitude,
+        longitude: longitude,
+        radius: radius,
+      );
+      _status = RestaurantLoadingStatus.loaded;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _status = RestaurantLoadingStatus.error;
+      _restaurants = [];
+    }
+    notifyListeners();
+  }
+
+  Future<void> fetchRestaurantById(String id) async {
+    _status = RestaurantLoadingStatus.loading;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final restaurant = await _restaurantService.getRestaurantById(id);
+
+      // Ensure menu items have valid IDs
+      for (var i = 0; i < restaurant.menu.length; i++) {
+        if (restaurant.menu[i].id.isEmpty) {
+          // If the backend didn't provide an ID, create a temporary one
+          restaurant.menu[i] = MenuItem(
+            id: 'temp_id_$i',
+            name: restaurant.menu[i].name,
+            description: restaurant.menu[i].description,
+            price: restaurant.menu[i].price,
+            image: restaurant.menu[i].image,
+          );
+        }
+      }
+
+      _selectedRestaurant = restaurant;
+      _status = RestaurantLoadingStatus.loaded;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _status = RestaurantLoadingStatus.error;
+      _selectedRestaurant = null;
+    }
+    notifyListeners();
+  }
+
+  Future<void> searchRestaurants(String query) async {
+    _status = RestaurantLoadingStatus.loading;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      _restaurants = await _restaurantService.searchRestaurants(query);
+      _status = RestaurantLoadingStatus.loaded;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _status = RestaurantLoadingStatus.error;
+      _restaurants = [];
+    }
+    notifyListeners();
+  }
+
+  void clearSelectedRestaurant() {
+    _selectedRestaurant = null;
+    notifyListeners();
+  }
+}
+
+
+/* File: screens\auth\login_screen.dart */
+// lib/screens/auth/login_screen.dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'dart:convert';
+import '../../services/api_service.dart';
+import '../../services/auth_service.dart';
+import '../../providers/auth_provider.dart';
+import '../../utils/validation_utils.dart';
+import '../../utils/dialog_utils.dart';
+import '../../widgets/rounded_button.dart';
+import '../../widgets/rounded_text_field.dart';
+import '../home/home_screen.dart';
+import 'register_screen.dart';
+import '../../models/user.dart';
+import '../../theme/app_theme.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({Key? key}) : super(key: key);
+
+  @override
+  _LoginScreenState createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _phoneController = TextEditingController();
+  bool _isLoading = false;
+  String? _errorMessage;
+  bool _obscurePassword = true;
+
+  // Track current login mode (email or phone)
+  bool _isEmailMode = true;
+
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final apiService = ApiService();
+    final authService = AuthService();
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    final result = await apiService.login(
+      email: _isEmailMode ? _emailController.text.trim() : null,
+      phone: !_isEmailMode ? _phoneController.text.trim() : null,
+      password: _passwordController.text.trim(),
+    );
+
+    if (!mounted) return;
+
+    if (result['success'] == true) {
+      final user = User.fromJson(result['user']);
+
+      // Restrict access to only "customer" role
+      if (user.role != 'customer') {
+        setState(() {
+          _errorMessage = 'Only customers are allowed to log in.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      await authService.saveAuthData(
+        result['token'],
+        jsonEncode(user.toJson()),
+      );
+      authProvider.setUser(user);
+      authProvider.setToken(result['token']);
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    } else {
+      setState(() {
+        _errorMessage = result['message'];
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _toggleLoginMode() {
+    setState(() {
+      _isEmailMode = !_isEmailMode;
+      // Clear the error message when switching modes
+      _errorMessage = null;
+    });
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.symmetric(horizontal: 24.w),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(height: 32.h),
+                Text(
+                  "Login to your account",
+                  style: theme.textTheme.displayLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 32.sp,
+                    color: Colors.black,
+                  ),
+                ),
+                SizedBox(height: 12.h),
+                Text(
+                  "Enter your details to continue",
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: Colors.grey[600],
+                  ),
+                ),
+                SizedBox(height: 32.h),
+
+                // Conditionally show either email or phone field
+                if (_isEmailMode) ...[
+                  RoundedTextField(
+                    controller: _emailController,
+                    labelText: "Email Address",
+                    hintText: "Albertstevano@gmail.com",
+                    keyboardType: TextInputType.emailAddress,
+                    validator: ValidationUtils.validateEmail,
+                  ),
+                ] else ...[
+                  RoundedTextField(
+                    controller: _phoneController,
+                    labelText: "Phone Number",
+                    hintText: "+94771234567",
+                    keyboardType: TextInputType.phone,
+                    validator: ValidationUtils.validatePhone,
+                  ),
+                ],
+
+                // Toggle link to switch between email and phone
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _toggleLoginMode,
+                    child: Text(
+                      _isEmailMode
+                          ? "Use phone number instead"
+                          : "Use email instead",
+                      style: TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+
+                SizedBox(height: 20.h),
+                RoundedTextField(
+                  controller: _passwordController,
+                  labelText: "Password",
+                  hintText: "**********",
+                  obscureText: _obscurePassword,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_off
+                          : Icons.visibility,
+                      color: Colors.grey,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                  ),
+                  validator: ValidationUtils.validatePassword,
+                ),
+
+                if (_errorMessage != null)
+                  Padding(
+                    padding: EdgeInsets.only(top: 16.h),
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        color: theme.colorScheme.error,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+
+                SizedBox(height: 24.h),
+                RoundedButton(
+                  text: "Login",
+                  onPressed: _login,
+                  isLoading: _isLoading,
+                ),
+
+                SizedBox(height: 32.h),
+                Center(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RegisterScreen(),
+                        ),
+                      );
+                    },
+                    child: RichText(
+                      text: TextSpan(
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: Colors.black,
+                        ),
+                        children: [
+                          const TextSpan(text: "Don't have an account? "),
+                          TextSpan(
+                            text: "Sign Up",
+                            style: TextStyle(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 24.h),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\auth\register_screen.dart */
+import 'package:client_customer/screens/auth/login_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'dart:convert';
+import '../../services/api_service.dart';
+import '../../services/auth_service.dart';
+import '../../providers/auth_provider.dart';
+import '../home/home_screen.dart';
+import '../../models/user.dart';
+import '../../theme/app_theme.dart';
+
+class RegisterScreen extends StatefulWidget {
+  const RegisterScreen({super.key});
+
+  @override
+  State<RegisterScreen> createState() => _RegisterScreenState();
+}
+
+class _RegisterScreenState extends State<RegisterScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _addressController = TextEditingController();
+  bool _isAgree = false;
+  bool _isLoading = false;
+  String? _errorMessage;
+  bool _obscurePassword = true;
+
+  Future<void> _register() async {
+    if (!_formKey.currentState!.validate() || !_isAgree) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final apiService = ApiService();
+    final authService = AuthService();
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    final result = await apiService.register(
+      name: _nameController.text.trim(),
+      email: _emailController.text.trim(),
+      phone: _phoneController.text.trim(),
+      password: _passwordController.text.trim(),
+      address: _addressController.text.trim(),
+    );
+
+    if (!mounted) return;
+
+    if (result['success'] == true) {
+      final user = User.fromJson(result['user']);
+      await authService.saveAuthData(
+        result['token'],
+        jsonEncode(user.toJson()),
+      );
+      authProvider.setUser(user);
+      authProvider.setToken(result['token']);
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    } else {
+      setState(() {
+        _errorMessage = result['message'];
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 32),
+                Text(
+                  "Create your new account",
+                  style: theme.textTheme.displayLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 32,
+                    color: Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  "Create an account to start looking for the food you like",
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 32),
+                _label("Email Address"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _emailController,
+                  hintText: "Albertstevano@gmail.com",
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your email';
+                    }
+                    if (!RegExp(
+                      r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                    ).hasMatch(value)) {
+                      return 'Please enter a valid email';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                _label("User Name"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _nameController,
+                  hintText: "Alber tstevano",
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your name';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                _label("Phone Number"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _phoneController,
+                  hintText: "+94771234567",
+                  keyboardType: TextInputType.phone,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your phone number';
+                    }
+                    if (!RegExp(r'^\+?[\d\s-]{10,}$').hasMatch(value)) {
+                      return 'Enter a valid phone number (e.g. +94771234567)';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                _label("Password"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _passwordController,
+                  hintText: "**********",
+                  obscureText: _obscurePassword,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_off
+                          : Icons.visibility,
+                      color: Colors.grey,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter a password';
+                    }
+                    if (value.length < 6) {
+                      return 'Password must be at least 6 characters';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                _label("Address"),
+                const SizedBox(height: 8),
+                _roundedField(
+                  controller: _addressController,
+                  hintText: "123 Main Street, City",
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your address';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _isAgree,
+                      onChanged: (val) {
+                        setState(() {
+                          _isAgree = val ?? false;
+                        });
+                      },
+                      activeColor: AppColors.primary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    Expanded(
+                      child: RichText(
+                        text: TextSpan(
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: Colors.black,
+                          ),
+                          children: [
+                            const TextSpan(text: "I Agree with "),
+                            TextSpan(
+                              text: "Terms of Service",
+                              style: TextStyle(
+                                color: AppColors.secondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const TextSpan(text: " and "),
+                            TextSpan(
+                              text: "Privacy Policy",
+                              style: TextStyle(
+                                color: AppColors.secondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (_errorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        color: theme.colorScheme.error,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: (_isLoading || !_isAgree) ? null : _register,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(56),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(32),
+                      ),
+                      textStyle: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 18,
+                      ),
+                    ),
+                    child:
+                        _isLoading
+                            ? const CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            )
+                            : const Text("Register"),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Center(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const LoginScreen(),
+                        ),
+                      );
+                    },
+                    child: RichText(
+                      text: TextSpan(
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(color: Colors.black),
+                        children: [
+                          const TextSpan(text: "Have an account? "),
+                          TextSpan(
+                            text: "Log in",
+                            style: TextStyle(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _label(String text) => Text(
+    text,
+    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+      color: Colors.black,
+      fontWeight: FontWeight.w600,
+    ),
+  );
+
+  Widget _roundedField({
+    required TextEditingController controller,
+    String? hintText,
+    TextInputType? keyboardType,
+    bool obscureText = false,
+    Widget? suffixIcon,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      validator: validator,
+      style: const TextStyle(fontSize: 16),
+      decoration: InputDecoration(
+        hintText: hintText,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 20,
+          horizontal: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: AppColors.primary, width: 2),
+        ),
+        suffixIcon: suffixIcon,
+      ),
+    );
+  }
+}
+
+
+/* File: screens\cart\cart_screen.dart */
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../providers/cart_provider.dart';
+import '../../models/cart.dart';
+import '../../theme/app_theme.dart';
+import 'checkout_screen.dart';
+
+class CartScreen extends StatefulWidget {
+  const CartScreen({Key? key}) : super(key: key);
+
+  @override
+  _CartScreenState createState() => _CartScreenState();
+}
+
+class _CartScreenState extends State<CartScreen> {
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCart();
+  }
+
+  Future<void> _fetchCart() async {
+    setState(() {
+      _isLoading = true;
+    });
+    
+    await Provider.of<CartProvider>(context, listen: false).fetchCart();
+    
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('My Cart'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _fetchCart,
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Consumer<CartProvider>(
+              builder: (context, cartProvider, child) {
+                if (cartProvider.error != null) {
+                  return Center(
+                    child: Text(
+                      'Error: ${cartProvider.error}',
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  );
+                }
+
+                if (cartProvider.cart == null || cartProvider.cart!.items.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.shopping_cart_outlined,
+                          size: 80,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Your cart is empty',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          ),
+                          child: const Text(
+                            'Browse Restaurants',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                return Column(
+                  children: [
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: cartProvider.cart!.items.length,
+                        itemBuilder: (context, index) {
+                          final item = cartProvider.cart!.items[index];
+                          return _buildCartItem(context, item, cartProvider);
+                        },
+                      ),
+                    ),
+                    _buildCartSummary(context, cartProvider),
+                  ],
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildCartItem(BuildContext context, CartItem item, CartProvider cartProvider) {
+    return Dismissible(
+      key: Key(item.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        color: Colors.red,
+        child: const Icon(
+          Icons.delete,
+          color: Colors.white,
+        ),
+      ),
+      onDismissed: (direction) {
+        cartProvider.removeFromCart(item.id);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${item.name} removed from cart'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      },
+      child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Item details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'LKR ${item.price.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Quantity controls
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.remove_circle_outline),
+                    onPressed: item.quantity > 1
+                        ? () => cartProvider.updateCartItem(item.id, item.quantity - 1)
+                        : null,
+                  ),
+                  Text(
+                    '${item.quantity}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_outline),
+                    onPressed: () => cartProvider.updateCartItem(item.id, item.quantity + 1),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCartSummary(BuildContext context, CartProvider cartProvider) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.3),
+            spreadRadius: 1,
+            blurRadius: 5,
+            offset: const Offset(0, -3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Subtotal',
+                style: TextStyle(fontSize: 16),
+              ),
+              Text(
+                'LKR ${cartProvider.totalAmount.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Delivery Fee',
+                style: TextStyle(fontSize: 16),
+              ),
+              Text(
+                'LKR ${(cartProvider.cart!.items.length > 0 ? 150.0 : 0.0).toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const Divider(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Total',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                'LKR ${(cartProvider.totalAmount + (cartProvider.cart!.items.length > 0 ? 150.0 : 0.0)).toStringAsFixed(2)}',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: cartProvider.cart!.items.isEmpty
+                  ? null
+                  : () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const CheckoutScreen(),
+                        ),
+                      );
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Proceed to Checkout',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (cartProvider.cart!.items.isNotEmpty)
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Clear Cart'),
+                      content: const Text('Are you sure you want to clear your cart?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            cartProvider.clearCart();
+                          },
+                          child: const Text('Clear'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                child: Text(
+                  'Clear Cart',
+                  style: TextStyle(
+                    color: Colors.red[700],
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/* File: screens\cart\checkout_screen.dart */
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../providers/cart_provider.dart';
+import '../../theme/app_theme.dart';
+import 'order_confirmation_screen.dart';
+
+class CheckoutScreen extends StatefulWidget {
+  const CheckoutScreen({Key? key}) : super(key: key);
+
+  @override
+  _CheckoutScreenState createState() => _CheckoutScreenState();
+}
+
+class _CheckoutScreenState extends State<CheckoutScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _addressController = TextEditingController();
+  bool _isProcessing = false;
+
+  // Mock location for now - in a real app, you'd use a location picker
+  final Map<String, double> _deliveryLocation = {
+    'latitude': 6.9271,
+    'longitude': 79.8612,
+  };
+
+  @override
+  void dispose() {
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _processCheckout() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    final cartProvider = Provider.of<CartProvider>(context, listen: false);
+    final result = await cartProvider.checkout(
+      _addressController.text.trim(),
+      _deliveryLocation,
+    );
+
+    setState(() {
+      _isProcessing = false;
+    });
+
+    if (!mounted) return;
+
+    if (result['success']) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder:
+              (context) =>
+                  OrderConfirmationScreen(orders: result['data']['orders']),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['message'] ?? 'Checkout failed'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Checkout')),
+      body: Consumer<CartProvider>(
+        builder: (context, cartProvider, child) {
+          if (cartProvider.cart == null || cartProvider.cart!.items.isEmpty) {
+            return const Center(child: Text('Your cart is empty'));
+          }
+
+          return Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const Text(
+                  'Delivery Address',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _addressController,
+                  decoration: InputDecoration(
+                    hintText: 'Enter your delivery address',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your delivery address';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Order Summary',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        ...cartProvider.cart!.items.map(
+                          (item) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${item.name} x ${item.quantity}',
+                                    style: const TextStyle(fontSize: 16),
+                                  ),
+                                ),
+                                Text(
+                                  'LKR ${(item.price * item.quantity).toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const Divider(),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Subtotal',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                            Text(
+                              'LKR ${cartProvider.totalAmount.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Delivery Fee',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                            const Text(
+                              'LKR 150.00',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Divider(),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Total',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              'LKR ${(cartProvider.totalAmount + 150.0).toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Payment Method',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        ListTile(
+                          leading: Radio(
+                            value: true,
+                            groupValue: true,
+                            onChanged: (value) {},
+                            activeColor: AppColors.primary,
+                          ),
+                          title: const Text('Pay Online'),
+                          subtitle: const Text(
+                            'Credit/Debit Card, Mobile Banking',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: _isProcessing ? null : _processCheckout,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child:
+                        _isProcessing
+                            ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                            : const Text(
+                              'Place Order',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+/* File: screens\cart\order_confirmation_screen.dart */
+import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
+
+class OrderConfirmationScreen extends StatelessWidget {
+  final List<dynamic> orders;
+
+  const OrderConfirmationScreen({Key? key, required this.orders})
+    : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Order Confirmation'),
+        automaticallyImplyLeading: false,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 80),
+            const SizedBox(height: 16),
+            const Text(
+              'Order Placed Successfully!',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your order has been placed and is being processed.',
+              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            const Text(
+              'Order Details',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            ...orders.map((order) => _buildOrderCard(context, order)),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pushNamedAndRemoveUntil(
+                    context,
+                    '/home',
+                    (route) => false,
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Continue Shopping',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrderCard(BuildContext context, dynamic order) {
+    final orderData = order['order'];
+    final payment = order['payment'];
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Order #${orderData['_id'].toString().substring(0, 8)}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'LKR ${orderData['totalAmount'].toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+            const Divider(),
+            const Text(
+              'Items:',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            ...(orderData['items'] as List).map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '${item['name']} x ${item['quantity']}',
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Payment Status:', style: TextStyle(fontSize: 14)),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color:
+                        orderData['paymentStatus'] == 'completed'
+                            ? Colors.green[100]
+                            : Colors.orange[100],
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    orderData['paymentStatus'].toString().toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color:
+                          orderData['paymentStatus'] == 'completed'
+                              ? Colors.green[800]
+                              : Colors.orange[800],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (payment != null && payment['checkoutUrl'] != null)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    // In a real app, you would launch a web view or external browser
+                    // to open the payment URL
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Redirecting to payment gateway...'),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                  child: const Text(
+                    'Complete Payment',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\home\home_screen.dart */
+// lib/screens/home/home_screen.dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import '../../models/restaurant.dart';
+import '../../providers/restaurant_provider.dart';
+import '../../theme/app_theme.dart';
+import '../../utils/dialog_utils.dart';
+import '../restaurant/restaurant_screen.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _loadRestaurants();
+  }
+
+  Future<void> _loadRestaurants() async {
+    // In a real app, you would get the user's location
+    // For now, we'll use hardcoded values
+    await Provider.of<RestaurantProvider>(
+      context,
+      listen: false,
+    ).fetchNearbyRestaurants(latitude: 12.9716, longitude: 77.5946, radius: 5);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: Column(
+        children: [
+          // Header with gradient background
+          Container(
+            padding: EdgeInsets.fromLTRB(16.w, 50.h, 16.w, 20.h),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [AppColors.primary, AppColors.primary.withOpacity(0.8)],
+              ),
+              borderRadius: BorderRadius.only(
+                bottomLeft: Radius.circular(24.r),
+                bottomRight: Radius.circular(24.r),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        "Flavor Town, Gastronomia",
+                        style: Theme.of(
+                          context,
+                        ).textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.search, color: Colors.white),
+                      onPressed: () {},
+                    ),
+                  ],
+                ),
+                SizedBox(height: 10.h),
+                Text(
+                  "Discover the best restaurants near you!",
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Body
+          Expanded(
+            child: Consumer<RestaurantProvider>(
+              builder: (context, restaurantProvider, _) {
+                if (restaurantProvider.isLoading) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                if (restaurantProvider.errorMessage != null) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('Error: ${restaurantProvider.errorMessage}'),
+                        SizedBox(height: 16.h),
+                        ElevatedButton(
+                          onPressed: _loadRestaurants,
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                final restaurants = restaurantProvider.restaurants;
+                if (restaurants.isEmpty) {
+                  return const Center(child: Text('No restaurants found'));
+                }
+
+                // Sort restaurants by distance
+                restaurants.sort(
+                  (a, b) => (a.distance ?? 0).compareTo(b.distance ?? 0),
+                );
+
+                return RefreshIndicator(
+                  onRefresh: _loadRestaurants,
+                  child: ListView.builder(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 16.w,
+                      vertical: 16.h,
+                    ),
+                    itemCount: restaurants.length,
+                    itemBuilder: (context, index) {
+                      final restaurant = restaurants[index];
+                      return _RestaurantCard(
+                        restaurant: restaurant,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder:
+                                  (_) => RestaurantDetailScreen(
+                                    restaurant: restaurant,
+                                  ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RestaurantCard extends StatelessWidget {
+  final Restaurant restaurant;
+  final VoidCallback onTap;
+
+  const _RestaurantCard({required this.restaurant, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: EdgeInsets.only(bottom: 28.h),
+        child: Column(
+          children: [
+            // Cover image, full width, curved top
+            ClipRRect(
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(28.r),
+                topRight: Radius.circular(28.r),
+              ),
+              child: Image.network(
+                restaurant.coverImage,
+                width: double.infinity,
+                height: 170.h,
+                fit: BoxFit.cover,
+                errorBuilder:
+                    (_, __, ___) => Container(
+                      height: 170.h,
+                      color: Colors.grey[200],
+                      child: const Icon(Icons.restaurant, size: 40),
+                    ),
+              ),
+            ),
+            // Details tile, full width, curved bottom
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(28.r),
+                  bottomRight: Radius.circular(28.r),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              padding: EdgeInsets.fromLTRB(24.w, 16.h, 24.w, 16.h),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    restaurant.name,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 6.h),
+                  Text(
+                    restaurant.description,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey[700]),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  SizedBox(height: 10.h),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.location_on,
+                        color: AppColors.primary,
+                        size: 18.sp,
+                      ),
+                      SizedBox(width: 4.w),
+                      Text(
+                        restaurant.distance != null
+                            ? "${restaurant.distance!.toStringAsFixed(2)} km"
+                            : "N/A",
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      SizedBox(width: 16.w),
+                      Icon(
+                        Icons.access_time,
+                        color: AppColors.primary,
+                        size: 18.sp,
+                      ),
+                      SizedBox(width: 4.w),
+                      Text(
+                        restaurant.operatingHours != null
+                            ? "${restaurant.operatingHours!.from ?? '??'} - ${restaurant.operatingHours!.to ?? '??'}"
+                            : "Hours N/A",
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\onboarding\onboarding1_screen.dart */
+import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
+import 'onboarding2_screen.dart';
+import '../auth/register_screen.dart';
+
+class Onboarding1Screen extends StatelessWidget {
+  const Onboarding1Screen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/onboarding1_bg.png', // Update to your asset path
+            fit: BoxFit.cover,
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(24, 36, 24, 36),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(36),
+                  topRight: Radius.circular(36),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "We serve incomparable delicacies",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.displayLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 26,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "All the best restaurants with their top menu waiting for you, they can’t wait for your order!!",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withOpacity(0.9),
+                      fontWeight: FontWeight.w400,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dot(true),
+                      const SizedBox(width: 8),
+                      _dot(false),
+                      const SizedBox(width: 8),
+                      _dot(false),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const RegisterScreen(),
+                            ),
+                          );
+                        },
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text(
+                          "Skip",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const Onboarding2Screen(),
+                            ),
+                          );
+                        },
+                        icon: const Text(
+                          "Next",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                        label: const Icon(
+                          Icons.arrow_forward,
+                          color: Colors.white,
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dot(bool isActive) {
+    return Container(
+      width: isActive ? 24 : 12,
+      height: 8,
+      decoration: BoxDecoration(
+        color: isActive ? Colors.white : Colors.white.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\onboarding\onboarding2_screen.dart */
+import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
+import 'onboarding3_screen.dart';
+import '../auth/register_screen.dart';
+
+class Onboarding2Screen extends StatelessWidget {
+  const Onboarding2Screen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/onboarding2_bg.png', // Update to your asset path
+            fit: BoxFit.cover,
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(24, 36, 24, 36),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(36),
+                  topRight: Radius.circular(36),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "We serve incomparable delicacies",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.displayLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 26,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "All the best restaurants with their top menu waiting for you, they can’t wait for your order!!",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withOpacity(0.9),
+                      fontWeight: FontWeight.w400,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dot(false),
+                      const SizedBox(width: 8),
+                      _dot(true),
+                      const SizedBox(width: 8),
+                      _dot(false),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const RegisterScreen(),
+                            ),
+                          );
+                        },
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text(
+                          "Skip",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const Onboarding3Screen(),
+                            ),
+                          );
+                        },
+                        icon: const Text(
+                          "Next",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                        label: const Icon(
+                          Icons.arrow_forward,
+                          color: Colors.white,
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dot(bool isActive) {
+    return Container(
+      width: isActive ? 24 : 12,
+      height: 8,
+      decoration: BoxDecoration(
+        color: isActive ? Colors.white : Colors.white.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\onboarding\onboarding3_screen.dart */
+import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
+import '../auth/register_screen.dart';
+
+class Onboarding3Screen extends StatelessWidget {
+  const Onboarding3Screen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/onboarding3_bg.png', // Update to your asset path
+            fit: BoxFit.cover,
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(24, 36, 24, 36),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(36),
+                  topRight: Radius.circular(36),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "We serve incomparable delicacies",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.displayLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 26,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "All the best restaurants with their top menu waiting for you, they can’t wait for your order!!",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withOpacity(0.9),
+                      fontWeight: FontWeight.w400,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dot(false),
+                      const SizedBox(width: 8),
+                      _dot(false),
+                      const SizedBox(width: 8),
+                      _dot(true),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  // Circular next button
+                  Center(
+                    child: SizedBox(
+                      width: 56,
+                      height: 56,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          CircularProgressIndicator(
+                            value: 1.0,
+                            strokeWidth: 3,
+                            backgroundColor: Colors.white.withOpacity(0.3),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
+                          ),
+                          Material(
+                            color: Colors.white,
+                            shape: const CircleBorder(),
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: () {
+                                Navigator.pushReplacement(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const RegisterScreen(),
+                                  ),
+                                );
+                              },
+                              child: const Padding(
+                                padding: EdgeInsets.all(8.0),
+                                child: Icon(
+                                  Icons.arrow_forward,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Optionally, you can add a skip button here if you want
+                  // Center(
+                  //   child: TextButton(
+                  //     onPressed: () {
+                  //       Navigator.pushReplacement(
+                  //         context,
+                  //         MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                  //       );
+                  //     },
+                  //     style: TextButton.styleFrom(
+                  //       foregroundColor: Colors.white,
+                  //     ),
+                  //     child: const Text(
+                  //       "Skip",
+                  //       style: TextStyle(
+                  //         fontWeight: FontWeight.w600,
+                  //         fontSize: 16,
+                  //       ),
+                  //     ),
+                  //   ),
+                  // ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dot(bool isActive) {
+    return Container(
+      width: isActive ? 24 : 12,
+      height: 8,
+      decoration: BoxDecoration(
+        color: isActive ? Colors.white : Colors.white.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+    );
+  }
+}
+
+
+/* File: screens\restaurant\menu_item_screen.dart */
+// lib/screens/restaurant/restaurant_detail_screen.dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../models/restaurant.dart';
+import '../../providers/cart_provider.dart';
+import '../../providers/restaurant_provider.dart';
+import '../../theme/app_theme.dart';
+import '../../utils/dialog_utils.dart';
+import '../../widgets/menu_item_card.dart';
+import '../cart/cart_screen.dart';
+
+class RestaurantDetailScreen extends StatefulWidget {
+  final String restaurantId;
+
+  const RestaurantDetailScreen({Key? key, required this.restaurantId})
+    : super(key: key);
+
+  @override
+  State<RestaurantDetailScreen> createState() => _RestaurantDetailScreenState();
+}
+
+class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRestaurantData();
+  }
+
+  Future<void> _loadRestaurantData() async {
+    try {
+      await Provider.of<RestaurantProvider>(
+        context,
+        listen: false,
+      ).fetchRestaurantById(widget.restaurantId);
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Failed to load restaurant details: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Consumer<RestaurantProvider>(
+        builder: (context, restaurantProvider, child) {
+          if (_isLoading) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (_errorMessage != null) {
+            return Center(child: Text(_errorMessage!));
+          }
+
+          final restaurant = restaurantProvider.selectedRestaurant;
+          if (restaurant == null) {
+            return const Center(child: Text('Restaurant not found'));
+          }
+
+          return CustomScrollView(
+            key: PageStorageKey('restaurantDetail_${restaurant.id}'),
+            slivers: [
+              _buildAppBar(context, restaurant),
+              _buildRestaurantInfo(context, restaurant),
+              _buildMenuList(context, restaurant),
+            ],
+          );
+        },
+      ),
+      floatingActionButton: Consumer<CartProvider>(
+        builder: (context, cartProvider, _) {
+          if (cartProvider.itemCount > 0) {
+            return FloatingActionButton.extended(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const CartScreen()),
+                );
+              },
+              backgroundColor: AppColors.primary,
+              label: Text('${cartProvider.itemCount} items'),
+              icon: const Icon(Icons.shopping_cart),
+            );
+          }
+          return const SizedBox.shrink();
+        },
+      ),
+    );
+  }
+
+  Widget _buildAppBar(BuildContext context, Restaurant restaurant) {
+    return SliverAppBar(
+      expandedHeight: 200.0,
+      pinned: true,
+      flexibleSpace: FlexibleSpaceBar(
+        title: Text(
+          restaurant.name,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 4.0,
+                color: Colors.black54,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+        ),
+        background:
+            restaurant.coverImage.isNotEmpty
+                ? Image.network(
+                  restaurant.coverImage,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      color: Colors.grey[300],
+                      child: const Center(
+                        child: Icon(
+                          Icons.restaurant,
+                          size: 80,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    );
+                  },
+                )
+                : Container(
+                  color: Colors.grey[300],
+                  child: const Center(
+                    child: Icon(Icons.restaurant, size: 80, color: Colors.grey),
+                  ),
+                ),
+      ),
+    );
+  }
+
+  Widget _buildRestaurantInfo(BuildContext context, Restaurant restaurant) {
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    restaurant.description,
+                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: restaurant.availability ? Colors.green : Colors.red,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    restaurant.availability ? 'Open' : 'Closed',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (restaurant.operatingHours != null)
+              Text(
+                'Hours: ${restaurant.operatingHours!.from} - ${restaurant.operatingHours!.to}',
+                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              ),
+            if (restaurant.distance != null)
+              Text(
+                'Distance: ${restaurant.distance!.toStringAsFixed(1)} km',
+                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              ),
+            const Divider(height: 32),
+            const Text(
+              'Menu',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuList(BuildContext context, Restaurant restaurant) {
+    if (restaurant.menu.isEmpty) {
+      return const SliverToBoxAdapter(
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text('No menu items available'),
+          ),
+        ),
+      );
+    }
+
+    return SliverPadding(
+      padding: const EdgeInsets.all(16.0),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final menuItem = restaurant.menu[index];
+          return MenuItemCard(
+            key: ValueKey('menuItem_${menuItem.id}'),
+            menuItem: menuItem,
+            restaurantId: restaurant.id,
+            onAddToCart: () => _addToCart(context, menuItem, restaurant.id),
+          );
+        }, childCount: restaurant.menu.length),
+      ),
+    );
+  }
+
+  Future<void> _addToCart(
+    BuildContext context,
+    MenuItem menuItem,
+    String restaurantId,
+  ) async {
+    final cartProvider = Provider.of<CartProvider>(context, listen: false);
+    final result = await cartProvider.addToCart(
+      menuItem,
+      restaurantId,
+      1, // Default quantity
+    );
+
+    if (!mounted) return;
+
+    if (result['success']) {
+      DialogUtils.showSnackBar(
+        context,
+        '${menuItem.name} added to cart',
+        isError: false,
+      );
+    } else {
+      if (result['message'].toString().contains('multiple restaurants')) {
+        // Show warning about multiple restaurants
+        showDialog(
+          context: context,
+          builder:
+              (context) => AlertDialog(
+                title: const Text('Items from Different Restaurant'),
+                content: const Text(
+                  'Your cart contains items from another restaurant. Adding this item will clear your current cart. Do you want to continue?',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await cartProvider.clearCart();
+                      if (!mounted) return;
+
+                      final newResult = await cartProvider.addToCart(
+                        menuItem,
+                        restaurantId,
+                        1,
+                      );
+
+                      if (newResult['success']) {
+                        DialogUtils.showSnackBar(
+                          context,
+                          '${menuItem.name} added to cart',
+                          isError: false,
+                        );
+                      } else {
+                        DialogUtils.showSnackBar(
+                          context,
+                          newResult['message'] ?? 'Failed to add item to cart',
+                          isError: true,
+                        );
+                      }
+                    },
+                    child: const Text('Continue'),
+                  ),
+                ],
+              ),
+        );
+      } else {
+        DialogUtils.showSnackBar(
+          context,
+          result['message'] ?? 'Failed to add item to cart',
+          isError: true,
+        );
+      }
+    }
+  }
+}
+
+
+/* File: screens\restaurant\restaurant_screen.dart */
+// New restaurant_detail_screen.dart
+import 'package:flutter/material.dart';
+import '../../models/restaurant.dart';
+import '../../theme/app_theme.dart';
+
+class RestaurantDetailScreen extends StatelessWidget {
+  final Restaurant restaurant;
+
+  const RestaurantDetailScreen({super.key, required this.restaurant});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            expandedHeight: 250,
+            flexibleSpace: FlexibleSpaceBar(
+              background: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.network(
+                    restaurant.coverImage,
+                    fit: BoxFit.cover,
+                    errorBuilder:
+                        (_, __, ___) => Container(
+                          color: Colors.grey[200],
+                          child: const Icon(Icons.restaurant, size: 60),
+                        ),
+                  ),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [Colors.black54, Colors.transparent],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            pinned: true,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.favorite_border),
+                onPressed: () {},
+                color: Colors.white,
+              ),
+            ],
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    restaurant.name,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    restaurant.description,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  Text(
+                    'Menu Items',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => _MenuItemCard(item: restaurant.menu[index]),
+              childCount: restaurant.menu.length,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuItemCard extends StatelessWidget {
+  final MenuItem item;
+
+  const _MenuItemCard({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: const BorderRadius.horizontal(
+              left: Radius.circular(15),
+            ),
+            child: Image.network(
+              item.image,
+              width: 100,
+              height: 100,
+              fit: BoxFit.cover,
+              errorBuilder:
+                  (_, __, ___) => Container(
+                    width: 100,
+                    height: 100,
+                    color: Colors.grey[200],
+                    child: const Icon(Icons.fastfood),
+                  ),
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.description,
+                    style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '\$${item.price.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/* File: services\api_service.dart */
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:client_customer/models/restaurant.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
+
+class ApiService {
+  static const String _userBaseUrl = 'http://127.0.0.1:3000/api/users';
+  static const String _restaurantBaseUrl =
+      'http://127.0.0.1:3001/api/restaurants';
+
+  Future<Map<String, dynamic>> register({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+    required String address,
+  }) async {
+    try {
+      // Validate input parameters first
+      if (email.isEmpty || !email.contains('@')) {
+        return {
+          'success': false,
+          'message': 'Please enter a valid email address',
+          'errorCode': 'invalid_email',
+        };
+      }
+
+      if (password.length < 6) {
+        return {
+          'success': false,
+          'message': 'Password must be at least 6 characters',
+          'errorCode': 'weak_password',
+        };
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$_userBaseUrl/customers/register'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'name': name,
+              'email': email,
+              'phone': phone,
+              'password': password,
+              'address': address,
+              'role': 'customer',
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      // Handle empty or malformed response
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Empty response from server',
+          'errorCode': 'empty_response',
+          'statusCode': response.statusCode,
+        };
+      }
+
+      final responseData = jsonDecode(response.body);
+
+      // Successful registration
+      if (response.statusCode == 201) {
+        return {
+          'success': true,
+          'token': responseData['token'],
+          'user': responseData['data']['user'],
+          'message': 'Registration successful',
+        };
+      }
+
+      // Handle specific error responses from server
+      if (response.statusCode == 400) {
+        return {
+          'success': false,
+          'message': responseData['message'] ?? 'Invalid request data',
+          'errorCode': responseData['errorCode'] ?? 'bad_request',
+          'validationErrors': responseData['errors'],
+          'statusCode': response.statusCode,
+        };
+      }
+
+      if (response.statusCode == 409) {
+        return {
+          'success': false,
+          'message': 'Email already in use',
+          'errorCode': 'email_conflict',
+          'statusCode': response.statusCode,
+        };
+      }
+
+      // Handle other status codes
+      return {
+        'success': false,
+        'message':
+            responseData['message'] ??
+            'Registration failed with status ${response.statusCode}',
+        'errorCode': responseData['errorCode'] ?? 'server_error',
+        'statusCode': response.statusCode,
+      };
+    } on SocketException catch (e) {
+      return {
+        'success': false,
+        'message': 'No internet connection',
+        'errorCode': 'no_connection',
+        'details': e.toString(),
+      };
+    } on TimeoutException catch (e) {
+      return {
+        'success': false,
+        'message': 'Connection timeout',
+        'errorCode': 'timeout',
+        'details': e.toString(),
+      };
+    } on http.ClientException catch (e) {
+      return {
+        'success': false,
+        'message': 'Network error occurred',
+        'errorCode': 'network_error',
+        'details': e.toString(),
+      };
+    } on FormatException catch (e) {
+      return {
+        'success': false,
+        'message': 'Invalid server response format',
+        'errorCode': 'invalid_format',
+        'details': e.toString(),
+      };
+    } catch (e) {
+      debugPrint('Registration error: $e');
+      return {
+        'success': false,
+        'message': 'An unexpected error occurred',
+        'errorCode': 'unknown_error',
+        'details': e.toString(),
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> login({
+    String? email,
+    String? phone,
+    required String password,
+  }) async {
+    try {
+      // Validate at least one identifier is provided
+      if ((email == null || email.isEmpty) &&
+          (phone == null || phone.isEmpty)) {
+        return {
+          'success': false,
+          'message': 'Email or phone required',
+          'errorCode': 'missing_credentials',
+        };
+      }
+
+      final body = <String, dynamic>{'password': password};
+      if (email != null && email.isNotEmpty) body['email'] = email;
+      if (phone != null && phone.isNotEmpty) body['phone'] = phone;
+
+      final response = await http
+          .post(
+            Uri.parse('$_userBaseUrl/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final responseData = jsonDecode(response.body);
+
+      switch (response.statusCode) {
+        case 200:
+          return {
+            'success': true,
+            'token': responseData['token'],
+            'user': responseData['data']['user'],
+          };
+        case 400:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Invalid request',
+            'errorCode': responseData['errorCode'] ?? 'bad_request',
+          };
+        case 401:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Invalid credentials',
+            'errorCode': 'invalid_credentials',
+          };
+        case 403:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Account not active',
+            'errorCode':
+                responseData['details']?.toString() ?? 'inactive_account',
+          };
+        default:
+          return {
+            'success': false,
+            'message': responseData['message'] ?? 'Login failed',
+            'statusCode': response.statusCode,
+          };
+      }
+    } on SocketException {
+      return {'success': false, 'message': 'No internet connection'};
+    } on TimeoutException {
+      return {'success': false, 'message': 'Connection timeout'};
+    } on http.ClientException catch (e) {
+      return {'success': false, 'message': 'Network error: ${e.message}'};
+    } catch (e) {
+      debugPrint('Login error: $e');
+      return {'success': false, 'message': 'An unexpected error occurred'};
+    }
+  }
+
+  Future<Map<String, dynamic>> getProfile(String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_userBaseUrl/me'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      final responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'user': responseData['data']['user']};
+      } else {
+        return {
+          'success': false,
+          'message': responseData['message'] ?? 'Failed to fetch profile',
+        };
+      }
+    } catch (e) {
+      debugPrint('Profile error: $e');
+      return {
+        'success': false,
+        'message': 'An error occurred while fetching profile',
+      };
+    }
+  }
+
+  Future<List<Restaurant>> getNearbyRestaurants(
+    double lat,
+    double lon,
+    int radius,
+  ) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_restaurantBaseUrl/nearby').replace(
+          queryParameters: {
+            'latitude': lat.toString(),
+            'longitude': lon.toString(),
+            'radius': radius.toString(),
+          },
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        List<dynamic> data = jsonDecode(response.body);
+        return data.map((json) => Restaurant.fromJson(json)).toList();
+      }
+      throw Exception('Failed to load restaurants');
+    } catch (e) {
+      throw Exception('Restaurant API error: $e');
+    }
+  }
+
+  Future<Restaurant> getRestaurantDetails(String restaurantId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_restaurantBaseUrl/$restaurantId'),
+      );
+
+      if (response.statusCode == 200) {
+        return Restaurant.fromJson(jsonDecode(response.body));
+      }
+      throw Exception('Failed to load restaurant details');
+    } catch (e) {
+      throw Exception('Restaurant details error: $e');
+    }
+  }
+}
+
+
+/* File: services\auth_service.dart */
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+
+class AuthService {
+  static const String _tokenKey = 'auth_token';
+  static const String _userKey = 'auth_user';
+
+  Future<bool> saveAuthData(String token, String userJson) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_tokenKey, token);
+      await prefs.setString(_userKey, userJson);
+      return true;
+    } catch (e) {
+      debugPrint('Error saving auth data: $e');
+      return false;
+    }
+  }
+
+  Future<String?> getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_tokenKey);
+  }
+
+  Future<Map<String, dynamic>?> getUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userJson = prefs.getString(_userKey);
+    if (userJson != null) {
+      return Map<String, dynamic>.from(jsonDecode(userJson));
+    }
+    return null;
+  }
+
+  Future<bool> clearAuthData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_tokenKey);
+      await prefs.remove(_userKey);
+      return true;
+    } catch (e) {
+      debugPrint('Error clearing auth data: $e');
+      return false;
+    }
+  }
+}
+
+
+/* File: services\cart_service.dart */
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'auth_service.dart';
+import 'api_service.dart';
+
+class CartService {
+  final String baseUrl = 'http://127.0.0.1:3001/api/cart';
+  final AuthService _authService = AuthService();
+  final ApiService _apiService = ApiService();
+
+  Future<Map<String, dynamic>> getCart() async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        return {'success': false, 'message': 'Not authenticated'};
+      }
+
+      final response = await http.get(
+        Uri.parse(baseUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return {'success': true, 'data': json.decode(response.body)};
+      } else {
+        return {
+          'success': false,
+          'message': 'Failed to get cart: ${response.statusCode}',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> addToCart({
+    required String restaurantId,
+    required String menuItemId,
+    required String name,
+    required double price,
+    required int quantity,
+  }) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        return {'success': false, 'message': 'Not authenticated'};
+      }
+
+      final body = {
+        'restaurantId': restaurantId,
+        'menuItemId': menuItemId,
+        'name': name,
+        'price': price,
+        'quantity': quantity,
+      };
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/items'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode(body),
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return {'success': true, 'data': json.decode(response.body)};
+      } else {
+        return {
+          'success': false,
+          'message': 'Failed to add item to cart: ${response.statusCode}',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateCartItem(
+    String itemId,
+    int quantity,
+  ) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        return {'success': false, 'message': 'Not authenticated'};
+      }
+
+      final body = {'itemId': itemId, 'quantity': quantity};
+
+      final response = await http.patch(
+        Uri.parse('$baseUrl/items'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode(body),
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return {'success': true, 'data': json.decode(response.body)};
+      } else {
+        return {
+          'success': false,
+          'message': 'Failed to update cart item: ${response.statusCode}',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> removeFromCart(String itemId) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        return {'success': false, 'message': 'Not authenticated'};
+      }
+
+      final response = await http.delete(
+        Uri.parse('$baseUrl/items/$itemId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return {'success': true, 'data': json.decode(response.body)};
+      } else {
+        return {
+          'success': false,
+          'message': 'Failed to remove item from cart: ${response.statusCode}',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> clearCart() async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        return {'success': false, 'message': 'Not authenticated'};
+      }
+
+      final response = await http.delete(
+        Uri.parse(baseUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return {'success': true, 'data': json.decode(response.body)};
+      } else {
+        return {
+          'success': false,
+          'message': 'Failed to clear cart: ${response.statusCode}',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> checkout(
+    String deliveryAddress,
+    Map<String, double> deliveryLocation,
+  ) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        return {'success': false, 'message': 'Not authenticated'};
+      }
+
+      final body = {
+        'deliveryAddress': deliveryAddress,
+        'deliveryLocation': {
+          'type': 'Point',
+          'coordinates': [
+            deliveryLocation['longitude'],
+            deliveryLocation['latitude'],
+          ],
+        },
+      };
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/checkout'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode(body),
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return {'success': true, 'data': json.decode(response.body)};
+      } else {
+        return {
+          'success': false,
+          'message':
+              'Failed to checkout: ${response.statusCode} ${response.body}',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+}
+
+
+/* File: services\restaurant_service.dart */
+// lib/services/restaurant_service.dart
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../models/restaurant.dart';
+import '../utils/constants.dart';
+import 'auth_service.dart';
+
+class RestaurantService {
+  final AuthService _authService = AuthService();
+  final String _baseUrl = ApiConstants.baseUrl;
+
+  Future<List<Restaurant>> getNearbyRestaurants({
+    required double latitude,
+    required double longitude,
+    required double radius,
+  }) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('Authentication token not found');
+      }
+
+      final response = await http.get(
+        Uri.parse(
+          '${ApiConstants.restaurantBaseUrl}/nearby?latitude=$latitude&longitude=$longitude&radius=$radius',
+        ),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        // The response is a JSON array, not an object
+        List<dynamic> data = jsonDecode(response.body);
+        return data.map((json) => Restaurant.fromJson(json)).toList();
+      } else {
+        throw Exception('Failed to load restaurants: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Failed to load restaurants: $e');
+    }
+  }
+
+  Future<Restaurant> getRestaurantById(String id) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('Authentication token not found');
+      }
+
+      final response = await http.get(
+        Uri.parse('$_baseUrl/restaurants/$id'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        if (data['success'] == true) {
+          return Restaurant.fromJson(data['data']);
+        } else {
+          throw Exception(data['message'] ?? 'Failed to load restaurant');
+        }
+      } else {
+        throw Exception('Failed to load restaurant: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Failed to load restaurant: $e');
+    }
+  }
+
+  Future<List<Restaurant>> searchRestaurants(String query) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('Authentication token not found');
+      }
+
+      final response = await http.get(
+        Uri.parse('$_baseUrl/restaurants/search?query=$query'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        if (data['success'] == true) {
+          return (data['data'] as List)
+              .map((restaurantJson) => Restaurant.fromJson(restaurantJson))
+              .toList();
+        } else {
+          throw Exception(data['message'] ?? 'Failed to search restaurants');
+        }
+      } else {
+        throw Exception('Failed to search restaurants: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Failed to search restaurants: $e');
+    }
+  }
+}
+
+
+/* File: theme\app_theme.dart */
+import 'package:flutter/material.dart';
+
+class AppColors {
+  static const primary = Color(0xFFFFA000); // Orange for buttons and highlights
+  static const secondary = Color(0xFF4F46E5); // Purple (optional)
+  static const background = Color(0xFFFFFFFF);
+  static const error = Color(0xFFEF4444);
+  static const text = Color(0xFF111827);
+  static const muted = Color(0xFF6B7280);
+  static const border = Color(0xFFE5E7EB);
+}
+
+class AppTheme {
+  static ThemeData get lightTheme {
+    return ThemeData(
+      fontFamily: 'InterVariable',
+      scaffoldBackgroundColor: AppColors.background,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColors.primary,
+        brightness: Brightness.light,
+      ),
+      textTheme: const TextTheme(
+        displayLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.w700),
+        titleLarge: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+        bodyMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w400),
+        labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: AppColors.background,
+        foregroundColor: AppColors.text,
+        elevation: 0,
+        titleTextStyle: TextStyle(
+          fontFamily: 'InterVariable',
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: AppColors.text,
+        ),
+      ),
+      inputDecorationTheme: const InputDecorationTheme(
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderSide: BorderSide(color: AppColors.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderSide: BorderSide(color: AppColors.primary, width: 2),
+        ),
+        labelStyle: TextStyle(fontFamily: 'InterVariable'),
+        contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(56),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(32),
+          ),
+          textStyle: const TextStyle(
+            fontFamily: 'InterVariable',
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
+          ),
+        ),
+      ),
+      checkboxTheme: CheckboxThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        fillColor: MaterialStateProperty.all(AppColors.primary),
+      ),
+    );
+  }
+}
+
+
+/* File: utils\app_exceptions.dart */
+// lib/utils/app_exceptions.dart
+class AppException implements Exception {
+  final String message;
+  final String? prefix;
+  final String? url;
+
+  AppException([this.message = '', this.prefix, this.url]);
+
+  @override
+  String toString() {
+    return "$prefix$message";
+  }
+}
+
+class FetchDataException extends AppException {
+  FetchDataException([String? message, String? url])
+    : super(
+        message ?? "Error During Communication",
+        "Communication Error: ",
+        url,
+      );
+}
+
+class BadRequestException extends AppException {
+  BadRequestException([String? message, String? url])
+    : super(message ?? "Invalid Request", "Invalid Request: ", url);
+}
+
+class UnauthorisedException extends AppException {
+  UnauthorisedException([String? message, String? url])
+    : super(message ?? "Unauthorised", "Unauthorised: ", url);
+}
+
+class InvalidInputException extends AppException {
+  InvalidInputException([String? message])
+    : super(message ?? "Invalid Input", "Invalid Input: ");
+}
+
+class NetworkException extends AppException {
+  NetworkException([String? message])
+    : super(message ?? "Network Error", "Network Error: ");
+}
+
+
+/* File: utils\constants.dart */
+// lib/utils/constants.dart
+class ApiConstants {
+  static const String baseUrl = 'http://127.0.0.1:3001/api';
+  static const String userBaseUrl = 'http://127.0.0.1:3000/api/users';
+  static const String restaurantBaseUrl =
+      'http://127.0.0.1:3001/api/restaurants';
+  static const String cartBaseUrl = 'http://127.0.0.1:3001/api/cart';
+}
+
+class AppConstants {
+  static const double defaultPadding = 16.0;
+  static const double borderRadius = 8.0;
+  static const int requestTimeout = 15; // seconds
+}
+
+
+/* File: utils\dialog_utils.dart */
+// lib/utils/dialog_utils.dart
+import 'package:flutter/material.dart';
+
+class DialogUtils {
+  static void showSnackBar(
+    BuildContext context,
+    String message, {
+    bool isError = false,
+    Duration duration = const Duration(seconds: 2),
+  }) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        duration: duration,
+      ),
+    );
+  }
+
+  static Future<bool> showConfirmationDialog(
+    BuildContext context,
+    String title,
+    String message,
+  ) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Confirm'),
+              ),
+            ],
+          ),
+    );
+    return result ?? false;
+  }
+}
+
+
+/* File: utils\error_handler.dart */
+// lib/utils/error_handler.dart
+import 'dart:ui';
+
+import 'package:flutter/material.dart';
+import 'dart:async';
+
+class ErrorHandler {
+  static void initialize() {
+    // Catch Flutter errors
+    FlutterError.onError = (FlutterErrorDetails details) {
+      FlutterError.presentError(details);
+      _reportError(details.exception, details.stack);
+    };
+
+    // Catch async errors that aren't caught by the Flutter framework
+    PlatformDispatcher.instance.onError = (error, stack) {
+      _reportError(error, stack);
+      return true;
+    };
+  }
+
+  static void _reportError(dynamic error, StackTrace? stack) {
+    // Log the error (in a real app, you might send this to a service)
+    debugPrint('Caught error: $error');
+    if (stack != null) {
+      debugPrint('Stack trace: $stack');
+    }
+  }
+
+  // Helper method to show error snackbar
+  static void showErrorSnackBar(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+}
+
+
+/* File: utils\screen_utils.dart */
+// lib/utils/screen_utils.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+
+class ScreenUtil {
+  static void init(
+    BuildContext context, {
+    Size designSize = const Size(360, 690),
+  }) {
+    ScreenUtilInit(designSize: designSize, builder: (_, __) => Container());
+  }
+
+  static double setWidth(double width) => width.w;
+  static double setHeight(double height) => height.h;
+  static double setRadius(double radius) => radius.r;
+  static double setSp(double fontSize) => fontSize.sp;
+}
+
+
+/* File: utils\validation_utils.dart */
+// lib/utils/validation_utils.dart
+class ValidationUtils {
+  static String? validateEmail(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your email';
+    }
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+      return 'Please enter a valid email';
+    }
+    return null;
+  }
+
+  static String? validatePassword(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your password';
+    }
+    if (value.length < 6) {
+      return 'Password must be at least 6 characters';
+    }
+    return null;
+  }
+
+  static String? validatePhone(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your phone number';
+    }
+    if (!RegExp(r'^\+?[\d\s-]{10,}$').hasMatch(value)) {
+      return 'Enter a valid phone number (e.g. +94771234567)';
+    }
+    return null;
+  }
+
+  static String? validateRequired(String? value, String fieldName) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your $fieldName';
+    }
+    return null;
+  }
+}
+
+
+/* File: widgets\menu_item_card.dart */
+// lib/widgets/menu_item_card.dart
+import 'package:flutter/material.dart';
+import '../models/restaurant.dart';
+import '../theme/app_theme.dart';
+
+class MenuItemCard extends StatelessWidget {
+  final MenuItem menuItem;
+  final String restaurantId;
+  final VoidCallback onAddToCart;
+
+  const MenuItemCard({
+    Key? key,
+    required this.menuItem,
+    required this.restaurantId,
+    required this.onAddToCart,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16.0),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Menu item image with proper constraints
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8.0),
+              child: SizedBox(
+                width: 80,
+                height: 80,
+                child:
+                    menuItem.image.isNotEmpty
+                        ? Image.network(
+                          menuItem.image,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              color: Colors.grey[300],
+                              child: const Icon(
+                                Icons.restaurant,
+                                color: Colors.grey,
+                              ),
+                            );
+                          },
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return Container(
+                              color: Colors.grey[200],
+                              child: const Center(
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
+                          },
+                        )
+                        : Container(
+                          color: Colors.grey[300],
+                          child: const Icon(
+                            Icons.restaurant,
+                            color: Colors.grey,
+                          ),
+                        ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            // Menu item details
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    menuItem.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    menuItem.description,
+                    style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'LKR ${menuItem.price.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      ElevatedButton(
+                        onPressed: onAddToCart,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                        ),
+                        child: const Text(
+                          'Add',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+/* File: widgets\rounded_button.dart */
+// lib/widgets/rounded_button.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import '../theme/app_theme.dart';
+
+class RoundedButton extends StatelessWidget {
+  final String text;
+  final VoidCallback onPressed;
+  final bool isLoading;
+  final Color? backgroundColor;
+  final Color? textColor;
+  final double? height;
+  final double? width;
+  final double? borderRadius;
+
+  const RoundedButton({
+    Key? key,
+    required this.text,
+    required this.onPressed,
+    this.isLoading = false,
+    this.backgroundColor,
+    this.textColor,
+    this.height,
+    this.width,
+    this.borderRadius,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width ?? double.infinity,
+      height: height ?? 56.h,
+      child: ElevatedButton(
+        onPressed: isLoading ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: backgroundColor ?? AppColors.primary,
+          foregroundColor: textColor ?? Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(borderRadius ?? 32.r),
+          ),
+          textStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: 18.sp),
+        ),
+        child:
+            isLoading
+                ? const CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                )
+                : Text(text),
+      ),
+    );
+  }
+}
+
+
+/* File: widgets\rounded_text_field.dart */
+// lib/widgets/rounded_text_field.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import '../theme/app_theme.dart';
+
+class RoundedTextField extends StatelessWidget {
+  final TextEditingController controller;
+  final String? hintText;
+  final TextInputType? keyboardType;
+  final bool obscureText;
+  final Widget? suffixIcon;
+  final String? Function(String?)? validator;
+  final String? labelText;
+
+  const RoundedTextField({
+    Key? key,
+    required this.controller,
+    this.hintText,
+    this.keyboardType,
+    this.obscureText = false,
+    this.suffixIcon,
+    this.validator,
+    this.labelText,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (labelText != null) ...[
+          Text(
+            labelText!,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: Colors.black,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          SizedBox(height: 8.h),
+        ],
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          obscureText: obscureText,
+          validator: validator,
+          style: TextStyle(fontSize: 16.sp),
+          decoration: InputDecoration(
+            hintText: hintText,
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: EdgeInsets.symmetric(
+              vertical: 20.h,
+              horizontal: 16.w,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14.r),
+              borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14.r),
+              borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14.r),
+              borderSide: BorderSide(color: AppColors.primary, width: 2),
+            ),
+            suffixIcon: suffixIcon,
+          ),
+        ),
+      ],
+    );
+  }
+}
+

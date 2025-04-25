@@ -36,10 +36,6 @@ const orderItemSchema = new mongoose.Schema({
     ],
     default: "pending",
   },
-  deliveryPersonId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-  },
 });
 
 const orderSchema = new mongoose.Schema({
@@ -48,41 +44,36 @@ const orderSchema = new mongoose.Schema({
     required: true,
     ref: "User",
   },
-  items: [orderItemSchema],
-  subOrders: [
-    {
-      restaurantId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Restaurant",
-      },
-      items: [
-        {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: "OrderItem",
-        },
-      ],
-      status: {
-        type: String,
-        enum: [
-          "pending",
-          "confirmed",
-          "preparing",
-          "ready",
-          "picked_up",
-          "delivered",
-          "cancelled",
-        ],
-        default: "pending",
-      },
-      deliveryPersonId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
+  restaurantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: "Restaurant",
+  },
+  customerInfo: {
+    name: {
+      type: String,
+      required: true,
     },
-  ],
+    phone: {
+      type: String,
+      required: true,
+    },
+  },
+  items: [orderItemSchema],
   deliveryAddress: {
     type: String,
     required: true,
+  },
+  deliveryLocation: {
+    type: {
+      type: String,
+      default: "Point",
+    },
+    coordinates: [Number], // [longitude, latitude]
+  },
+  deliveryPersonId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
   },
   totalAmount: {
     type: Number,
@@ -95,6 +86,35 @@ const orderSchema = new mongoose.Schema({
   },
   paymentId: {
     type: String,
+  },
+  trackingStatus: {
+    type: String,
+    enum: [
+      "placed",
+      "confirmed",
+      "preparing",
+      "ready_for_pickup",
+      "out_for_delivery",
+      "delivered",
+      "cancelled",
+    ],
+    default: "placed",
+  },
+  statusUpdates: [
+    {
+      status: String,
+      timestamp: {
+        type: Date,
+        default: Date.now,
+      },
+      note: String,
+    },
+  ],
+  estimatedDeliveryTime: {
+    preparationTime: Number,
+    travelTime: Number,
+    totalEstimatedTime: Number,
+    estimatedDeliveryAt: Date,
   },
   createdAt: {
     type: Date,
