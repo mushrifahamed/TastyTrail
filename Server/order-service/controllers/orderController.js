@@ -8,13 +8,12 @@ const notificationService = require("../services/notificationService");
 const estimationService = require("../services/estimationService");
 const userService = require("../services/userService");
 const { RESTAURANT_SERVICE_URL } = process.env;
-const amqp = require('amqplib/callback_api');
-
+const amqp = require("amqplib/callback_api");
 
 // Function to publish an event to RabbitMQ
 // Function to publish the order created event to RabbitMQ
 const publishOrderCreatedEvent = (orderId) => {
-  amqp.connect('amqp://localhost', (error, connection) => {
+  amqp.connect("amqp://localhost", (error, connection) => {
     if (error) {
       throw error;
     }
@@ -24,8 +23,8 @@ const publishOrderCreatedEvent = (orderId) => {
         throw error;
       }
 
-      const queue = 'order_created_queue';  // Queue name where delivery service listens
-      const msg = JSON.stringify({ orderId });  // Message payload (only orderId)
+      const queue = "order_created_queue"; // Queue name where delivery service listens
+      const msg = JSON.stringify({ orderId }); // Message payload (only orderId)
 
       channel.assertQueue(queue, { durable: true });
       channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });

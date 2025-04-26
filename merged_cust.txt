@@ -1,10 +1,14 @@
 
 /* File: main.dart */
-// lib/main.dart
+import 'dart:convert';
+
+import 'package:client_customer/screens/restaurant/restaurant_screen.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'providers/auth_provider.dart';
 import 'providers/cart_provider.dart';
 import 'providers/restaurant_provider.dart';
@@ -13,12 +17,31 @@ import 'models/user.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/auth/register_screen.dart';
-import 'screens/cart/cart_screen.dart';
 import 'theme/app_theme.dart';
 import 'screens/onboarding/onboarding1_screen.dart';
+import 'screens/cart/cart_screen.dart';
+import 'screens/cart/checkout_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(); // Ensure firebase is initialized
+
+  Future<void> testRegisterToken(String userId) async {
+    final fcmToken = await FirebaseMessaging.instance.getToken();
+    if (fcmToken != null) {
+      await http.post(
+        Uri.parse('http://10.0.2.2:5000/api/notifications/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'userId': userId,
+          'token': fcmToken,
+          'role': 'customer',
+        }),
+      );
+      print("✅ Token registered: $fcmToken");
+    }
+  }
 
   final authService = AuthService();
   final token = await authService.getToken();
@@ -32,14 +55,11 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(
-          create:
-              (_) =>
-                  AuthProvider()
-                    ..setToken(token ?? '')
-                    ..setUser(
-                      initialUser ??
-                          User(id: '', name: '', email: '', role: ''),
-                    ),
+          create: (_) => AuthProvider()
+            ..setToken(token ?? '')
+            ..setUser(
+              initialUser ?? User(id: '', name: '', email: '', role: ''),
+            ),
         ),
         ChangeNotifierProvider(create: (_) => CartProvider()),
         ChangeNotifierProvider(create: (_) => RestaurantProvider()),
@@ -63,8 +83,7 @@ class MyApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           home: Consumer<AuthProvider>(
             builder: (context, authProvider, _) {
-              final isCustomer =
-                  authProvider.user != null &&
+              final isCustomer = authProvider.user != null &&
                   authProvider.user!.role == 'customer';
               return (authProvider.isAuth && isCustomer)
                   ? const HomeScreen()
@@ -75,7 +94,13 @@ class MyApp extends StatelessWidget {
             '/login': (context) => const LoginScreen(),
             '/register': (context) => const RegisterScreen(),
             '/home': (context) => const HomeScreen(),
-            '/cart': (context) => const CartScreen(),
+            '/restaurant': (context) => RestaurantDetailScreen(
+                  restaurantId:
+                      ModalRoute.of(context)!.settings.arguments as String,
+                ),
+            '/cart': (context) => const CartScreen(), // Add this line
+            '/checkout': (context) =>
+                const CheckoutScreen(), // Add this if you have a checkout screen
           },
         );
       },
@@ -204,21 +229,27 @@ class Restaurant {
   });
 
   factory Restaurant.fromJson(Map<String, dynamic> json) {
+    // Add debugging
+    print('Parsing restaurant JSON: ${json['_id']}');
+
+    final id = json['_id'] is String ? json['_id'] : json['_id'].toString();
+    print('Parsed restaurant ID: $id');
+
     return Restaurant(
       id: json['_id'] ?? '',
       name: json['name'] ?? 'No name',
       description: json['description'] ?? '',
       coverImage: json['coverImage'] ?? '',
       availability: json['availability'] ?? true,
-      menu:
-          (json['menu'] as List<dynamic>? ?? [])
-              .map((x) => MenuItem.fromJson(x))
-              .toList(),
-      operatingHours:
-          json['operatingHours'] != null
-              ? OperatingHours.fromJson(json['operatingHours'])
-              : null,
-      distance: (json['distance'] ?? 0.0) / 1000, // Convert meters to km
+      menu: (json['menu'] as List<dynamic>? ?? [])
+          .map((x) => MenuItem.fromJson(x))
+          .toList(),
+      operatingHours: json['operatingHours'] != null
+          ? OperatingHours.fromJson(json['operatingHours'])
+          : null,
+      distance: json.containsKey('distance')
+          ? (json['distance'] ?? 0.0) / 1000
+          : null,
     );
   }
 }
@@ -451,10 +482,10 @@ class CartProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final result = await _cartService.checkout(
-        deliveryAddress,
-        deliveryLocation,
-      );
+      final result = await _cartService.checkout({
+        'address': deliveryAddress,
+        'location': deliveryLocation,
+      });
       if (result['success']) {
         _cart = Cart.fromJson({
           'customerId': _cart?.customerId ?? '',
@@ -473,12 +504,71 @@ class CartProvider with ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Map<String, List<CartItem>> get itemsByRestaurant {
+    if (_cart == null) return {};
+
+    Map<String, List<CartItem>> grouped = {};
+
+    for (var item in _cart!.items) {
+      if (!grouped.containsKey(item.restaurantId)) {
+        grouped[item.restaurantId] = [];
+      }
+      grouped[item.restaurantId]!.add(item);
+    }
+
+    return grouped;
+  }
+
+// Calculate total amount for a specific restaurant
+  double getTotalAmountForRestaurant(String restaurantId) {
+    if (_cart == null) return 0.0;
+
+    return _cart!.items
+        .where((item) => item.restaurantId == restaurantId)
+        .fold(0.0, (sum, item) => sum + (item.price * item.quantity));
+  }
+
+// Checkout items from a specific restaurant
+  Future<void> checkoutRestaurant(
+      String restaurantId, String deliveryAddress) async {
+    try {
+      _isLoading = true;
+      notifyListeners();
+
+      // Filter items for this restaurant
+      List<CartItem> restaurantItems = _cart!.items
+          .where((item) => item.restaurantId == restaurantId)
+          .toList();
+
+      if (restaurantItems.isEmpty) {
+        throw Exception('No items for this restaurant');
+      }
+
+      // Call checkout API
+      await _cartService.checkoutRestaurant(restaurantId, deliveryAddress);
+
+      // Refresh cart after checkout
+      await fetchCart();
+
+      _isLoading = false;
+      notifyListeners();
+    } catch (error) {
+      _isLoading = false;
+      _error = error.toString();
+      notifyListeners();
+      throw error;
+    }
+  }
 }
 
 
 /* File: providers\restaurant_provider.dart */
 // lib/providers/restaurant_provider.dart
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../models/restaurant.dart';
 import '../services/restaurant_service.dart';
 
@@ -574,6 +664,32 @@ class RestaurantProvider with ChangeNotifier {
     _selectedRestaurant = null;
     notifyListeners();
   }
+
+  Future<Restaurant> getRestaurantById(String restaurantId) async {
+    print('Getting restaurant details for ID: $restaurantId');
+
+    try {
+      final response = await http.get(
+        Uri.parse('http://10.0.2.2:3001/api/restaurants/$restaurantId'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        print('Restaurant API response received');
+        final data = json.decode(response.body);
+        return Restaurant.fromJson(data);
+      } else {
+        print('API error status: ${response.statusCode}');
+        throw Exception(
+            'Failed to load restaurant details: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching restaurant: $e');
+      throw Exception('Error fetching restaurant: $e');
+    }
+  }
 }
 
 
@@ -586,13 +702,9 @@ import 'dart:convert';
 import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../providers/auth_provider.dart';
-import '../../utils/validation_utils.dart';
-import '../../utils/dialog_utils.dart';
-import '../../widgets/rounded_button.dart';
-import '../../widgets/rounded_text_field.dart';
+import '../../models/user.dart';
 import '../home/home_screen.dart';
 import 'register_screen.dart';
-import '../../models/user.dart';
 import '../../theme/app_theme.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -683,6 +795,36 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  String? _validateEmail(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your email';
+    }
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+      return 'Please enter a valid email';
+    }
+    return null;
+  }
+
+  String? _validatePhone(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your phone number';
+    }
+    if (!RegExp(r'^\+?[\d\s-]{10,}$').hasMatch(value)) {
+      return 'Enter a valid phone number (e.g. +94771234567)';
+    }
+    return null;
+  }
+
+  String? _validatePassword(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your password';
+    }
+    if (value.length < 6) {
+      return 'Password must be at least 6 characters';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -716,20 +858,30 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 // Conditionally show either email or phone field
                 if (_isEmailMode) ...[
-                  RoundedTextField(
+                  TextFormField(
                     controller: _emailController,
-                    labelText: "Email Address",
-                    hintText: "Albertstevano@gmail.com",
+                    decoration: InputDecoration(
+                      labelText: "Email Address",
+                      hintText: "Albertstevano@gmail.com",
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                     keyboardType: TextInputType.emailAddress,
-                    validator: ValidationUtils.validateEmail,
+                    validator: _validateEmail,
                   ),
                 ] else ...[
-                  RoundedTextField(
+                  TextFormField(
                     controller: _phoneController,
-                    labelText: "Phone Number",
-                    hintText: "+94771234567",
+                    decoration: InputDecoration(
+                      labelText: "Phone Number",
+                      hintText: "+94771234567",
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
                     keyboardType: TextInputType.phone,
-                    validator: ValidationUtils.validatePhone,
+                    validator: _validatePhone,
                   ),
                 ],
 
@@ -751,25 +903,30 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
 
                 SizedBox(height: 20.h),
-                RoundedTextField(
+                TextFormField(
                   controller: _passwordController,
-                  labelText: "Password",
-                  hintText: "**********",
-                  obscureText: _obscurePassword,
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword
-                          ? Icons.visibility_off
-                          : Icons.visibility,
-                      color: Colors.grey,
+                  decoration: InputDecoration(
+                    labelText: "Password",
+                    hintText: "**********",
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                        color: Colors.grey,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                        });
+                      },
+                    ),
                   ),
-                  validator: ValidationUtils.validatePassword,
+                  obscureText: _obscurePassword,
+                  validator: _validatePassword,
                 ),
 
                 if (_errorMessage != null)
@@ -785,10 +942,37 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
 
                 SizedBox(height: 24.h),
-                RoundedButton(
-                  text: "Login",
-                  onPressed: _login,
-                  isLoading: _isLoading,
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: 16.h),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child:
+                        _isLoading
+                            ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
+                              ),
+                            )
+                            : const Text(
+                              "Login",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                  ),
                 ),
 
                 SizedBox(height: 32.h),
@@ -1209,12 +1393,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
 
 /* File: screens\cart\cart_screen.dart */
+// In screens/cart/cart_screen.dart
+
+import 'package:client_customer/models/cart.dart';
+import 'package:client_customer/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/cart_provider.dart';
-import '../../models/cart.dart';
-import '../../theme/app_theme.dart';
-import 'checkout_screen.dart';
+import '../../services/restaurant_service.dart';
+import '../../models/restaurant.dart';
 
 class CartScreen extends StatefulWidget {
   const CartScreen({Key? key}) : super(key: key);
@@ -1224,330 +1411,421 @@ class CartScreen extends StatefulWidget {
 }
 
 class _CartScreenState extends State<CartScreen> {
-  bool _isLoading = false;
+  final RestaurantService _restaurantService = RestaurantService();
+  Map<String, Restaurant> _restaurants = {};
+  bool _loadingRestaurants = false;
 
   @override
   void initState() {
     super.initState();
-    _fetchCart();
+    Future.microtask(() =>
+        Provider.of<CartProvider>(context, listen: false).fetchCart().then((_) {
+          _fetchRestaurantDetails();
+        }));
   }
 
-  Future<void> _fetchCart() async {
+  Future<void> _fetchRestaurantDetails() async {
+    final cartProvider = Provider.of<CartProvider>(context, listen: false);
+    if (cartProvider.cart == null) return;
+
     setState(() {
-      _isLoading = true;
+      _loadingRestaurants = true;
     });
-    
-    await Provider.of<CartProvider>(context, listen: false).fetchCart();
-    
-    setState(() {
-      _isLoading = false;
-    });
+
+    try {
+      final restaurantIds = cartProvider.itemsByRestaurant.keys.toList();
+
+      for (final id in restaurantIds) {
+        if (!_restaurants.containsKey(id)) {
+          final restaurant = await _restaurantService.getRestaurantById(id);
+          setState(() {
+            _restaurants[id] = restaurant;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error fetching restaurant details: $e');
+    } finally {
+      setState(() {
+        _loadingRestaurants = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My Cart'),
+        title: const Text('Your Cart'),
+        elevation: 0,
+        backgroundColor: Colors.white,
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _fetchCart,
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Consumer<CartProvider>(
-              builder: (context, cartProvider, child) {
-                if (cartProvider.error != null) {
-                  return Center(
-                    child: Text(
-                      'Error: ${cartProvider.error}',
-                      style: const TextStyle(color: Colors.red),
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () {
+              // Implement clear cart functionality
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Clear Cart?'),
+                  content:
+                      const Text('Are you sure you want to clear your cart?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
                     ),
-                  );
-                }
-
-                if (cartProvider.cart == null || cartProvider.cart!.items.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.shopping_cart_outlined,
-                          size: 80,
-                          color: Colors.grey[400],
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Your cart is empty',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.pop(context);
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primary,
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          ),
-                          child: const Text(
-                            'Browse Restaurants',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                return Column(
-                  children: [
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: cartProvider.cart!.items.length,
-                        itemBuilder: (context, index) {
-                          final item = cartProvider.cart!.items[index];
-                          return _buildCartItem(context, item, cartProvider);
-                        },
-                      ),
-                    ),
-                    _buildCartSummary(context, cartProvider),
-                  ],
-                );
-              },
-            ),
-    );
-  }
-
-  Widget _buildCartItem(BuildContext context, CartItem item, CartProvider cartProvider) {
-    return Dismissible(
-      key: Key(item.id),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        color: Colors.red,
-        child: const Icon(
-          Icons.delete,
-          color: Colors.white,
-        ),
-      ),
-      onDismissed: (direction) {
-        cartProvider.removeFromCart(item.id);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${item.name} removed from cart'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
-      child: Card(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Item details
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.name,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'LKR ${item.price.toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[600],
-                      ),
+                    TextButton(
+                      onPressed: () {
+                        Provider.of<CartProvider>(context, listen: false)
+                            .clearCart();
+                        Navigator.pop(context);
+                      },
+                      style: TextButton.styleFrom(foregroundColor: Colors.red),
+                      child: const Text('Clear'),
                     ),
                   ],
                 ),
-              ),
-              
-              // Quantity controls
-              Row(
+              );
+            },
+          ),
+        ],
+      ),
+      body: Consumer<CartProvider>(
+        builder: (context, cartProvider, child) {
+          if (cartProvider.isLoading) {
+            return _buildLoadingState();
+          }
+
+          if (cartProvider.error != null) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.remove_circle_outline),
-                    onPressed: item.quantity > 1
-                        ? () => cartProvider.updateCartItem(item.id, item.quantity - 1)
-                        : null,
-                  ),
+                  Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
+                  const SizedBox(height: 16),
                   Text(
-                    '${item.quantity}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    'Error: ${cartProvider.error}',
+                    style: TextStyle(color: Colors.grey[600]),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.add_circle_outline),
-                    onPressed: () => cartProvider.updateCartItem(item.id, item.quantity + 1),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: () => cartProvider.fetchCart(),
+                    child: const Text('Try Again'),
                   ),
                 ],
               ),
+            );
+          }
+
+          if (cartProvider.cart == null || cartProvider.itemCount == 0) {
+            return _buildEmptyCart();
+          }
+
+          final itemsByRestaurant = cartProvider.itemsByRestaurant;
+
+          return Column(
+            children: [
+              Expanded(
+                child: ListView.builder(
+                  itemCount: itemsByRestaurant.length,
+                  padding: const EdgeInsets.all(16),
+                  itemBuilder: (context, index) {
+                    final restaurantId =
+                        itemsByRestaurant.keys.elementAt(index);
+                    final restaurantItems = itemsByRestaurant[restaurantId]!;
+                    final restaurant = _restaurants[restaurantId];
+                    final restaurantName = restaurant?.name ?? 'Restaurant';
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 24),
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Restaurant Header
+                            Row(
+                              children: [
+                                Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(8),
+                                    color: Colors.grey[200],
+                                    image: restaurant?.coverImage != null
+                                        ? DecorationImage(
+                                            image: NetworkImage(
+                                                restaurant!.coverImage),
+                                            fit: BoxFit.cover,
+                                          )
+                                        : null,
+                                  ),
+                                  child: restaurant?.coverImage == null
+                                      ? const Icon(Icons.restaurant,
+                                          color: Colors.grey)
+                                      : null,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        restaurantName,
+                                        style: const TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${restaurantItems.length} items',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.grey[600],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const Divider(height: 24),
+
+                            // Items List
+                            ...restaurantItems.map((item) => _buildCartItem(
+                                  item: item,
+                                  cartProvider: cartProvider,
+                                )),
+
+                            const Divider(height: 24),
+
+                            // Order Summary
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'Subtotal',
+                                    style: TextStyle(fontSize: 16),
+                                  ),
+                                  Text(
+                                    '\$${cartProvider.getTotalAmountForRestaurant(restaurantId).toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            // Checkout Button
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  Navigator.pushNamed(
+                                    context,
+                                    '/checkout',
+                                    arguments: {
+                                      'restaurantId': restaurantId,
+                                      'restaurantName': restaurantName,
+                                    },
+                                  );
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 16),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Checkout',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             ],
-          ),
-        ),
+          );
+        },
       ),
     );
   }
 
-  Widget _buildCartSummary(BuildContext context, CartProvider cartProvider) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.3),
-            spreadRadius: 1,
-            blurRadius: 5,
-            offset: const Offset(0, -3),
+  Widget _buildCartItem({
+    required CartItem item,
+    required CartProvider cartProvider,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Item details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.name,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '\$${item.price.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    color: Colors.grey[700],
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Quantity controls
+          Row(
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove, size: 16),
+                      onPressed: item.quantity > 1
+                          ? () => cartProvider.updateCartItem(
+                              item.id, item.quantity - 1)
+                          : null,
+                      color:
+                          item.quantity > 1 ? AppColors.primary : Colors.grey,
+                      padding: const EdgeInsets.all(8),
+                      constraints: const BoxConstraints(),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      constraints: const BoxConstraints(minWidth: 24),
+                      child: Text(
+                        '${item.quantity}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add, size: 16),
+                      onPressed: () => cartProvider.updateCartItem(
+                          item.id, item.quantity + 1),
+                      color: AppColors.primary,
+                      padding: const EdgeInsets.all(8),
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Text(
+                '\$${(item.price * item.quantity).toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline,
+                    size: 20, color: Colors.red),
+                onPressed: () => cartProvider.removeFromCart(item.id),
+                padding: const EdgeInsets.all(8),
+                constraints: const BoxConstraints(),
+              ),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildEmptyCart() {
+    return Center(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Subtotal',
-                style: TextStyle(fontSize: 16),
-              ),
-              Text(
-                'LKR ${cartProvider.totalAmount.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Delivery Fee',
-                style: TextStyle(fontSize: 16),
-              ),
-              Text(
-                'LKR ${(cartProvider.cart!.items.length > 0 ? 150.0 : 0.0).toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const Divider(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Total',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                'LKR ${(cartProvider.totalAmount + (cartProvider.cart!.items.length > 0 ? 150.0 : 0.0)).toStringAsFixed(2)}',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primary,
-                ),
-              ),
-            ],
+          Icon(
+            Icons.shopping_cart_outlined,
+            size: 80,
+            color: Colors.grey[400],
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: cartProvider.cart!.items.isEmpty
-                  ? null
-                  : () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const CheckoutScreen(),
-                        ),
-                      );
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: const Text(
-                'Proceed to Checkout',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
+          Text(
+            'Your cart is empty',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[700],
             ),
           ),
           const SizedBox(height: 8),
-          if (cartProvider.cart!.items.isNotEmpty)
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Clear Cart'),
-                      content: const Text('Are you sure you want to clear your cart?'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Cancel'),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.pop(context);
-                            cartProvider.clearCart();
-                          },
-                          child: const Text('Clear'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-                child: Text(
-                  'Clear Cart',
-                  style: TextStyle(
-                    color: Colors.red[700],
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+          Text(
+            'Add items from restaurants to start an order',
+            style: TextStyle(color: Colors.grey[600]),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: () => Navigator.pushNamed(context, '/home'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 32,
+                vertical: 16,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
+            child: const Text('Browse Restaurants'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('Loading your cart...'),
         ],
       ),
     );
@@ -1556,11 +1834,12 @@ class _CartScreenState extends State<CartScreen> {
 
 
 /* File: screens\cart\checkout_screen.dart */
+// In screens/cart/checkout_screen.dart
+
+import 'package:client_customer/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/cart_provider.dart';
-import '../../theme/app_theme.dart';
-import 'order_confirmation_screen.dart';
 
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({Key? key}) : super(key: key);
@@ -1570,255 +1849,443 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _addressController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController();
+  final TextEditingController _noteController = TextEditingController();
+  String _selectedRestaurantId = '';
+  String _selectedRestaurantName = '';
+  String _selectedPaymentMethod = 'Cash on Delivery';
   bool _isProcessing = false;
 
-  // Mock location for now - in a real app, you'd use a location picker
-  final Map<String, double> _deliveryLocation = {
-    'latitude': 6.9271,
-    'longitude': 79.8612,
-  };
+  final List<String> _paymentMethods = [
+    'Cash on Delivery',
+    'Credit Card',
+    'PayPal',
+  ];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args != null && args is Map<String, dynamic>) {
+      _selectedRestaurantId = args['restaurantId'] ?? '';
+      _selectedRestaurantName = args['restaurantName'] ?? 'Restaurant';
+    }
+  }
 
   @override
   void dispose() {
     _addressController.dispose();
+    _noteController.dispose();
     super.dispose();
-  }
-
-  Future<void> _processCheckout() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isProcessing = true;
-    });
-
-    final cartProvider = Provider.of<CartProvider>(context, listen: false);
-    final result = await cartProvider.checkout(
-      _addressController.text.trim(),
-      _deliveryLocation,
-    );
-
-    setState(() {
-      _isProcessing = false;
-    });
-
-    if (!mounted) return;
-
-    if (result['success']) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder:
-              (context) =>
-                  OrderConfirmationScreen(orders: result['data']['orders']),
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] ?? 'Checkout failed'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Checkout')),
+      appBar: AppBar(
+        title: const Text('Checkout'),
+        centerTitle: true,
+        elevation: 0,
+        backgroundColor: Colors.white,
+      ),
       body: Consumer<CartProvider>(
         builder: (context, cartProvider, child) {
-          if (cartProvider.cart == null || cartProvider.cart!.items.isEmpty) {
-            return const Center(child: Text('Your cart is empty'));
+          if (_selectedRestaurantId.isEmpty) {
+            return const Center(child: Text('No restaurant selected'));
           }
 
-          return Form(
-            key: _formKey,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                const Text(
-                  'Delivery Address',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _addressController,
-                  decoration: InputDecoration(
-                    hintText: 'Enter your delivery address',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your delivery address';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'Order Summary',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        ...cartProvider.cart!.items.map(
-                          (item) => Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    '${item.name} x ${item.quantity}',
-                                    style: const TextStyle(fontSize: 16),
-                                  ),
-                                ),
-                                Text(
-                                  'LKR ${(item.price * item.quantity).toStringAsFixed(2)}',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const Divider(),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Subtotal',
-                              style: TextStyle(fontSize: 16),
-                            ),
-                            Text(
-                              'LKR ${cartProvider.totalAmount.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Delivery Fee',
-                              style: TextStyle(fontSize: 16),
-                            ),
-                            const Text(
-                              'LKR 150.00',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const Divider(),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Total',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              'LKR ${(cartProvider.totalAmount + 150.0).toStringAsFixed(2)}',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'Payment Method',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        ListTile(
-                          leading: Radio(
-                            value: true,
-                            groupValue: true,
-                            onChanged: (value) {},
-                            activeColor: AppColors.primary,
-                          ),
-                          title: const Text('Pay Online'),
-                          subtitle: const Text(
-                            'Credit/Debit Card, Mobile Banking',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _isProcessing ? null : _processCheckout,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
+          if (cartProvider.isLoading) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final restaurantItems =
+              cartProvider.itemsByRestaurant[_selectedRestaurantId] ?? [];
+
+          if (restaurantItems.isEmpty) {
+            return const Center(child: Text('No items to checkout'));
+          }
+
+          final totalAmount =
+              cartProvider.getTotalAmountForRestaurant(_selectedRestaurantId);
+          const deliveryFee = 2.99;
+          final taxAmount = totalAmount * 0.1; // 10% tax
+          final finalTotal = totalAmount + deliveryFee + taxAmount;
+
+          return Stack(
+            children: [
+              SingleChildScrollView(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Restaurant Info Card
+                    Card(
+                      elevation: 2,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.restaurant,
+                              color: AppColors.primary,
+                              size: 32,
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _selectedRestaurantName,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Text(
+                                    '${restaurantItems.length} items | Estimated delivery: 30-45 min',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    child:
-                        _isProcessing
-                            ? const SizedBox(
+
+                    const SizedBox(height: 20),
+
+                    // Delivery Address
+                    const Text(
+                      'Delivery Address',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _addressController,
+                      decoration: InputDecoration(
+                        hintText: 'Enter your delivery address',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        prefixIcon: const Icon(Icons.location_on),
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.my_location),
+                          onPressed: () {
+                            // Get current location
+                            _addressController.text = "Current Location";
+                          },
+                        ),
+                      ),
+                      maxLines: 2,
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Additional Note
+                    const Text(
+                      'Additional Note',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _noteController,
+                      decoration: InputDecoration(
+                        hintText: 'Special instructions for delivery',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        prefixIcon: const Icon(Icons.note),
+                      ),
+                      maxLines: 2,
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Payment Method
+                    const Text(
+                      'Payment Method',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Card(
+                      elevation: 1,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: Column(
+                          children: _paymentMethods.map((method) {
+                            return RadioListTile<String>(
+                              title: Text(method),
+                              value: method,
+                              groupValue: _selectedPaymentMethod,
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedPaymentMethod = value!;
+                                });
+                              },
+                              activeColor: AppColors.primary,
+                              contentPadding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Order Summary
+                    const Text(
+                      'Order Summary',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Card(
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          children: [
+                            // Item List (collapsible)
+                            ExpansionTile(
+                              title: Text(
+                                'Items (${restaurantItems.length})',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              initiallyExpanded: false,
+                              children: restaurantItems.map((item) {
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(item.name),
+                                  trailing: Text(
+                                    '${item.quantity} × \$${item.price.toStringAsFixed(2)}',
+                                  ),
+                                  subtitle: Text(
+                                    '\$${(item.price * item.quantity).toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+
+                            const Divider(),
+
+                            // Price breakdown
+                            _buildPriceSummaryRow('Subtotal',
+                                '\$${totalAmount.toStringAsFixed(2)}'),
+                            _buildPriceSummaryRow('Delivery Fee',
+                                '\$${deliveryFee.toStringAsFixed(2)}'),
+                            _buildPriceSummaryRow('Tax (10%)',
+                                '\$${taxAmount.toStringAsFixed(2)}'),
+                            const Divider(),
+                            _buildPriceSummaryRow(
+                              'Total',
+                              '\$${finalTotal.toStringAsFixed(2)}',
+                              isTotal: true,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 100), // Space for the fixed button
+                  ],
+                ),
+              ),
+
+              // Fixed place order button at bottom
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
+                  ),
+                  child: SafeArea(
+                    child: ElevatedButton(
+                      onPressed: _isProcessing
+                          ? null
+                          : () => _placeOrder(cartProvider),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        minimumSize: const Size(double.infinity, 50),
+                      ),
+                      child: _isProcessing
+                          ? const SizedBox(
                               width: 24,
                               height: 24,
                               child: CircularProgressIndicator(
-                                color: Colors.white,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.white),
                                 strokeWidth: 2,
                               ),
                             )
-                            : const Text(
+                          : const Text(
                               'Place Order',
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.white,
                               ),
                             ),
+                    ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           );
         },
       ),
     );
+  }
+
+  Widget _buildPriceSummaryRow(String label, String value,
+      {bool isTotal = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
+              fontSize: isTotal ? 16 : 14,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
+              fontSize: isTotal ? 16 : 14,
+              color: isTotal ? AppColors.primary : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _placeOrder(CartProvider cartProvider) async {
+    if (_addressController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a delivery address')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      await cartProvider.checkoutRestaurant(
+        _selectedRestaurantId,
+        _addressController.text.trim(),
+      );
+
+      if (!mounted) return;
+
+      // Show success and navigate
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Order placed successfully!')),
+      );
+
+      Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
+
+      // Show order confirmation dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Order Confirmed!'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.check_circle,
+                color: Colors.green,
+                size: 64,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Your order from $_selectedRestaurantName has been placed successfully.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'You can track your order in the orders section.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${error.toString()}')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+      }
+    }
   }
 }
 
@@ -2012,9 +2479,10 @@ import 'package:provider/provider.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../models/restaurant.dart';
 import '../../providers/restaurant_provider.dart';
+import '../../providers/cart_provider.dart';
 import '../../theme/app_theme.dart';
-import '../../utils/dialog_utils.dart';
 import '../restaurant/restaurant_screen.dart';
+import '../cart/cart_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -2024,6 +2492,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  int _selectedIndex = 0;
+
   @override
   void initState() {
     super.initState();
@@ -2032,132 +2502,147 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadRestaurants() async {
     // In a real app, you would get the user's location
-    // For now, we'll use hardcoded values
     await Provider.of<RestaurantProvider>(
       context,
       listen: false,
     ).fetchNearbyRestaurants(latitude: 12.9716, longitude: 77.5946, radius: 5);
   }
 
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: Column(
-        children: [
-          // Header with gradient background
-          Container(
-            padding: EdgeInsets.fromLTRB(16.w, 50.h, 16.w, 20.h),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [AppColors.primary, AppColors.primary.withOpacity(0.8)],
-              ),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(24.r),
-                bottomRight: Radius.circular(24.r),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        "Flavor Town, Gastronomia",
-                        style: Theme.of(
-                          context,
-                        ).textTheme.titleMedium?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.search, color: Colors.white),
-                      onPressed: () {},
-                    ),
-                  ],
-                ),
-                SizedBox(height: 10.h),
-                Text(
-                  "Discover the best restaurants near you!",
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Body
-          Expanded(
-            child: Consumer<RestaurantProvider>(
-              builder: (context, restaurantProvider, _) {
-                if (restaurantProvider.isLoading) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (restaurantProvider.errorMessage != null) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text('Error: ${restaurantProvider.errorMessage}'),
-                        SizedBox(height: 16.h),
-                        ElevatedButton(
-                          onPressed: _loadRestaurants,
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final restaurants = restaurantProvider.restaurants;
-                if (restaurants.isEmpty) {
-                  return const Center(child: Text('No restaurants found'));
-                }
-
-                // Sort restaurants by distance
-                restaurants.sort(
-                  (a, b) => (a.distance ?? 0).compareTo(b.distance ?? 0),
-                );
-
-                return RefreshIndicator(
-                  onRefresh: _loadRestaurants,
-                  child: ListView.builder(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 16.w,
-                      vertical: 16.h,
-                    ),
-                    itemCount: restaurants.length,
-                    itemBuilder: (context, index) {
-                      final restaurant = restaurants[index];
-                      return _RestaurantCard(
-                        restaurant: restaurant,
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder:
-                                  (_) => RestaurantDetailScreen(
-                                    restaurant: restaurant,
-                                  ),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                );
-              },
-            ),
+      body: _selectedIndex == 0 ? _buildHomeContent() : const CartScreen(),
+      bottomNavigationBar: BottomNavigationBar(
+        items: const <BottomNavigationBarItem>[
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.shopping_cart),
+            label: 'Cart',
           ),
         ],
+        currentIndex: _selectedIndex,
+        selectedItemColor: AppColors.primary,
+        onTap: _onItemTapped,
       ),
+    );
+  }
+
+  Widget _buildHomeContent() {
+    return Column(
+      children: [
+        // Header with gradient background
+        Container(
+          padding: EdgeInsets.fromLTRB(16.w, 50.h, 16.w, 20.h),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [AppColors.primary, AppColors.primary.withOpacity(0.8)],
+            ),
+            borderRadius: BorderRadius.only(
+              bottomLeft: Radius.circular(24.r),
+              bottomRight: Radius.circular(24.r),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      "Flavor Town, Gastronomia",
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.search, color: Colors.white),
+                    onPressed: () {},
+                  ),
+                ],
+              ),
+              SizedBox(height: 10.h),
+              Text(
+                "Discover the best restaurants near you!",
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w400,
+                    ),
+              ),
+            ],
+          ),
+        ),
+        // Body
+        Expanded(
+          child: Consumer<RestaurantProvider>(
+            builder: (context, restaurantProvider, _) {
+              if (restaurantProvider.isLoading) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              if (restaurantProvider.errorMessage != null) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('Error: ${restaurantProvider.errorMessage}'),
+                      SizedBox(height: 16.h),
+                      ElevatedButton(
+                        onPressed: _loadRestaurants,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              final restaurants = restaurantProvider.restaurants;
+              if (restaurants.isEmpty) {
+                return const Center(child: Text('No restaurants found'));
+              }
+
+              // Sort restaurants by distance
+              restaurants.sort(
+                (a, b) => (a.distance ?? 0).compareTo(b.distance ?? 0),
+              );
+
+              return RefreshIndicator(
+                onRefresh: _loadRestaurants,
+                child: ListView.builder(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 16.w,
+                    vertical: 16.h,
+                  ),
+                  itemCount: restaurants.length,
+                  itemBuilder: (context, index) {
+                    final restaurant = restaurants[index];
+                    return _RestaurantCard(
+                      restaurant: restaurant,
+                      onTap: () {
+                        Navigator.pushNamed(
+                          context,
+                          '/restaurant',
+                          arguments: restaurant.id,
+                        );
+                      },
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2187,12 +2672,11 @@ class _RestaurantCard extends StatelessWidget {
                 width: double.infinity,
                 height: 170.h,
                 fit: BoxFit.cover,
-                errorBuilder:
-                    (_, __, ___) => Container(
-                      height: 170.h,
-                      color: Colors.grey[200],
-                      child: const Icon(Icons.restaurant, size: 40),
-                    ),
+                errorBuilder: (_, __, ___) => Container(
+                  height: 170.h,
+                  color: Colors.grey[200],
+                  child: const Icon(Icons.restaurant, size: 40),
+                ),
               ),
             ),
             // Details tile, full width, curved bottom
@@ -2219,9 +2703,9 @@ class _RestaurantCard extends StatelessWidget {
                   Text(
                     restaurant.name,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
                   ),
                   SizedBox(height: 6.h),
                   Text(
@@ -2709,23 +3193,20 @@ class Onboarding3Screen extends StatelessWidget {
 }
 
 
-/* File: screens\restaurant\menu_item_screen.dart */
-// lib/screens/restaurant/restaurant_detail_screen.dart
+/* File: screens\restaurant\restaurant_screen.dart */
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/restaurant.dart';
 import '../../providers/cart_provider.dart';
 import '../../providers/restaurant_provider.dart';
-import '../../theme/app_theme.dart';
-import '../../utils/dialog_utils.dart';
-import '../../widgets/menu_item_card.dart';
-import '../cart/cart_screen.dart';
 
 class RestaurantDetailScreen extends StatefulWidget {
   final String restaurantId;
 
-  const RestaurantDetailScreen({Key? key, required this.restaurantId})
-    : super(key: key);
+  const RestaurantDetailScreen({
+    Key? key,
+    required this.restaurantId,
+  }) : super(key: key);
 
   @override
   State<RestaurantDetailScreen> createState() => _RestaurantDetailScreenState();
@@ -2733,27 +3214,42 @@ class RestaurantDetailScreen extends StatefulWidget {
 
 class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
   bool _isLoading = true;
-  String? _errorMessage;
+  Restaurant? _restaurant;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadRestaurantData();
+    _fetchRestaurantDetails();
   }
 
-  Future<void> _loadRestaurantData() async {
+  Future<void> _fetchRestaurantDetails() async {
+    print('DEBUG: Fetching restaurant with ID: ${widget.restaurantId}');
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
     try {
-      await Provider.of<RestaurantProvider>(
-        context,
-        listen: false,
-      ).fetchRestaurantById(widget.restaurantId);
+      final restaurantProvider =
+          Provider.of<RestaurantProvider>(context, listen: false);
+
+      // Make sure this method exists in your RestaurantProvider
+      final restaurant =
+          await restaurantProvider.getRestaurantById(widget.restaurantId);
+
+      print('DEBUG: Restaurant fetched successfully: ${restaurant.name}');
+
       setState(() {
+        _restaurant = restaurant;
         _isLoading = false;
       });
     } catch (e) {
+      print('ERROR: Failed to load restaurant: $e');
       setState(() {
+        _error = 'Failed to load restaurant details: $e';
         _isLoading = false;
-        _errorMessage = 'Failed to load restaurant details: $e';
       });
     }
   }
@@ -2761,149 +3257,116 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Consumer<RestaurantProvider>(
-        builder: (context, restaurantProvider, child) {
-          if (_isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (_errorMessage != null) {
-            return Center(child: Text(_errorMessage!));
-          }
-
-          final restaurant = restaurantProvider.selectedRestaurant;
-          if (restaurant == null) {
-            return const Center(child: Text('Restaurant not found'));
-          }
-
-          return CustomScrollView(
-            key: PageStorageKey('restaurantDetail_${restaurant.id}'),
-            slivers: [
-              _buildAppBar(context, restaurant),
-              _buildRestaurantInfo(context, restaurant),
-              _buildMenuList(context, restaurant),
-            ],
-          );
-        },
-      ),
-      floatingActionButton: Consumer<CartProvider>(
-        builder: (context, cartProvider, _) {
-          if (cartProvider.itemCount > 0) {
-            return FloatingActionButton.extended(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const CartScreen()),
-                );
-              },
-              backgroundColor: AppColors.primary,
-              label: Text('${cartProvider.itemCount} items'),
-              icon: const Icon(Icons.shopping_cart),
-            );
-          }
-          return const SizedBox.shrink();
-        },
-      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(child: Text(_error!))
+              : _restaurant == null
+                  ? const Center(child: Text('Restaurant not found'))
+                  : _buildRestaurantDetails(),
     );
   }
 
-  Widget _buildAppBar(BuildContext context, Restaurant restaurant) {
+  Widget _buildRestaurantDetails() {
+    if (_restaurant == null) return const SizedBox.shrink();
+
+    return CustomScrollView(
+      slivers: [
+        _buildAppBar(),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _restaurant!.name,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _restaurant!.description,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                _buildOperatingHours(),
+                const Divider(height: 32),
+                Text(
+                  'Menu',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+        _buildMenuList(),
+      ],
+    );
+  }
+
+  Widget _buildAppBar() {
     return SliverAppBar(
       expandedHeight: 200.0,
       pinned: true,
       flexibleSpace: FlexibleSpaceBar(
-        title: Text(
-          restaurant.name,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            shadows: [
-              Shadow(
-                blurRadius: 4.0,
-                color: Colors.black54,
-                offset: Offset(0, 2),
-              ),
-            ],
+        title: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            _restaurant!.name,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16.0,
+            ),
           ),
         ),
-        background:
-            restaurant.coverImage.isNotEmpty
-                ? Image.network(
-                  restaurant.coverImage,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      color: Colors.grey[300],
-                      child: const Center(
-                        child: Icon(
-                          Icons.restaurant,
-                          size: 80,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    );
-                  },
-                )
-                : Container(
+        background: _restaurant!.coverImage.isNotEmpty
+            ? Image.network(
+                _restaurant!.coverImage,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
                   color: Colors.grey[300],
-                  child: const Center(
-                    child: Icon(Icons.restaurant, size: 80, color: Colors.grey),
-                  ),
+                  child: const Icon(Icons.restaurant, size: 50),
                 ),
+              )
+            : Container(
+                color: Colors.grey[300],
+                child: const Icon(Icons.restaurant, size: 50),
+              ),
       ),
     );
   }
 
-  Widget _buildRestaurantInfo(BuildContext context, Restaurant restaurant) {
-    return SliverToBoxAdapter(
+  Widget _buildOperatingHours() {
+    final hours = _restaurant!.operatingHours;
+    if (hours == null) return const SizedBox.shrink();
+
+    return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.all(12.0),
+        child: Row(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    restaurant.description,
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: restaurant.availability ? Colors.green : Colors.red,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    restaurant.availability ? 'Open' : 'Closed',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
+            const Icon(Icons.access_time),
+            const SizedBox(width: 8),
+            Text(
+              '${hours.from ?? 'N/A'} - ${hours.to ?? 'N/A'}',
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
-            const SizedBox(height: 16),
-            if (restaurant.operatingHours != null)
-              Text(
-                'Hours: ${restaurant.operatingHours!.from} - ${restaurant.operatingHours!.to}',
-                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _restaurant!.availability ? Colors.green : Colors.red,
+                borderRadius: BorderRadius.circular(12),
               ),
-            if (restaurant.distance != null)
-              Text(
-                'Distance: ${restaurant.distance!.toStringAsFixed(1)} km',
-                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              child: Text(
+                _restaurant!.availability ? 'Open' : 'Closed',
+                style: const TextStyle(color: Colors.white),
               ),
-            const Divider(height: 32),
-            const Text(
-              'Menu',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
           ],
         ),
@@ -2911,245 +3374,54 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
     );
   }
 
-  Widget _buildMenuList(BuildContext context, Restaurant restaurant) {
-    if (restaurant.menu.isEmpty) {
-      return const SliverToBoxAdapter(
-        child: Center(
-          child: Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text('No menu items available'),
-          ),
-        ),
-      );
-    }
-
-    return SliverPadding(
-      padding: const EdgeInsets.all(16.0),
-      sliver: SliverList(
-        delegate: SliverChildBuilderDelegate((context, index) {
-          final menuItem = restaurant.menu[index];
-          return MenuItemCard(
-            key: ValueKey('menuItem_${menuItem.id}'),
-            menuItem: menuItem,
-            restaurantId: restaurant.id,
-            onAddToCart: () => _addToCart(context, menuItem, restaurant.id),
-          );
-        }, childCount: restaurant.menu.length),
+  Widget _buildMenuList() {
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          return _buildMenuItem(_restaurant!.menu[index]);
+        },
+        childCount: _restaurant!.menu.length,
       ),
     );
   }
 
-  Future<void> _addToCart(
-    BuildContext context,
-    MenuItem menuItem,
-    String restaurantId,
-  ) async {
-    final cartProvider = Provider.of<CartProvider>(context, listen: false);
-    final result = await cartProvider.addToCart(
-      menuItem,
-      restaurantId,
-      1, // Default quantity
-    );
-
-    if (!mounted) return;
-
-    if (result['success']) {
-      DialogUtils.showSnackBar(
-        context,
-        '${menuItem.name} added to cart',
-        isError: false,
-      );
-    } else {
-      if (result['message'].toString().contains('multiple restaurants')) {
-        // Show warning about multiple restaurants
-        showDialog(
-          context: context,
-          builder:
-              (context) => AlertDialog(
-                title: const Text('Items from Different Restaurant'),
-                content: const Text(
-                  'Your cart contains items from another restaurant. Adding this item will clear your current cart. Do you want to continue?',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                  TextButton(
-                    onPressed: () async {
-                      Navigator.pop(context);
-                      await cartProvider.clearCart();
-                      if (!mounted) return;
-
-                      final newResult = await cartProvider.addToCart(
-                        menuItem,
-                        restaurantId,
-                        1,
-                      );
-
-                      if (newResult['success']) {
-                        DialogUtils.showSnackBar(
-                          context,
-                          '${menuItem.name} added to cart',
-                          isError: false,
-                        );
-                      } else {
-                        DialogUtils.showSnackBar(
-                          context,
-                          newResult['message'] ?? 'Failed to add item to cart',
-                          isError: true,
-                        );
-                      }
-                    },
-                    child: const Text('Continue'),
-                  ),
-                ],
-              ),
-        );
-      } else {
-        DialogUtils.showSnackBar(
-          context,
-          result['message'] ?? 'Failed to add item to cart',
-          isError: true,
-        );
-      }
-    }
-  }
-}
-
-
-/* File: screens\restaurant\restaurant_screen.dart */
-// New restaurant_detail_screen.dart
-import 'package:flutter/material.dart';
-import '../../models/restaurant.dart';
-import '../../theme/app_theme.dart';
-
-class RestaurantDetailScreen extends StatelessWidget {
-  final Restaurant restaurant;
-
-  const RestaurantDetailScreen({super.key, required this.restaurant});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 250,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Image.network(
-                    restaurant.coverImage,
-                    fit: BoxFit.cover,
-                    errorBuilder:
-                        (_, __, ___) => Container(
-                          color: Colors.grey[200],
-                          child: const Icon(Icons.restaurant, size: 60),
-                        ),
-                  ),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [Colors.black54, Colors.transparent],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            pinned: true,
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.favorite_border),
-                onPressed: () {},
-                color: Colors.white,
-              ),
-            ],
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    restaurant.name,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    restaurant.description,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                  const SizedBox(height: 16),
-                  const Divider(),
-                  Text(
-                    'Menu Items',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _MenuItemCard(item: restaurant.menu[index]),
-              childCount: restaurant.menu.length,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MenuItemCard extends StatelessWidget {
-  final MenuItem item;
-
-  const _MenuItemCard({required this.item});
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildMenuItem(MenuItem menuItem) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: const BorderRadius.horizontal(
-              left: Radius.circular(15),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Menu item image
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 80,
+                height: 80,
+                child: menuItem.image.isNotEmpty
+                    ? Image.network(
+                        menuItem.image,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: Colors.grey[300],
+                          child: const Icon(Icons.restaurant),
+                        ),
+                      )
+                    : Container(
+                        color: Colors.grey[300],
+                        child: const Icon(Icons.restaurant),
+                      ),
+              ),
             ),
-            child: Image.network(
-              item.image,
-              width: 100,
-              height: 100,
-              fit: BoxFit.cover,
-              errorBuilder:
-                  (_, __, ___) => Container(
-                    width: 100,
-                    height: 100,
-                    color: Colors.grey[200],
-                    child: const Icon(Icons.fastfood),
-                  ),
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
+            const SizedBox(width: 12),
+            // Menu item details
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    item.name,
+                    menuItem.name,
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
@@ -3157,27 +3429,75 @@ class _MenuItemCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    item.description,
-                    style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                    menuItem.description,
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 13,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    '\$${item.price.toStringAsFixed(2)}',
-                    style: TextStyle(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '\$${menuItem.price.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => _addToCart(menuItem),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          minimumSize: const Size(0, 32),
+                        ),
+                        child: const Text('Add'),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+
+  void _addToCart(MenuItem menuItem) async {
+    try {
+      final cartProvider = Provider.of<CartProvider>(context, listen: false);
+      final result = await cartProvider.addToCart(
+        menuItem,
+        _restaurant!.id,
+        1,
+      );
+
+      if (result['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${menuItem.name} added to cart'),
+            action: SnackBarAction(
+              label: 'View Cart',
+              onPressed: () {
+                Navigator.pushNamed(context, '/cart');
+              },
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result['message'] ?? 'Failed to add to cart')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to add to cart: $e')),
+      );
+    }
   }
 }
 
@@ -3187,13 +3507,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:client_customer/models/restaurant.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 
 class ApiService {
-  static const String _userBaseUrl = 'http://127.0.0.1:3000/api/users';
+  static const String _userBaseUrl = 'http://10.0.2.2:3000/api/users';
   static const String _restaurantBaseUrl =
-      'http://127.0.0.1:3001/api/restaurants';
+      'http://10.0.2.2:3001/api/restaurants';
 
   Future<Map<String, dynamic>> register({
     required String name,
@@ -3280,8 +3601,7 @@ class ApiService {
       // Handle other status codes
       return {
         'success': false,
-        'message':
-            responseData['message'] ??
+        'message': responseData['message'] ??
             'Registration failed with status ${response.statusCode}',
         'errorCode': responseData['errorCode'] ?? 'server_error',
         'statusCode': response.statusCode,
@@ -3325,6 +3645,26 @@ class ApiService {
     }
   }
 
+  Future<void> registerDeviceToken(String userId) async {
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token == null) return;
+
+      await http.post(
+        Uri.parse(
+            'http://10.0.2.2:5000/api/notifications/register'), // Replace port if needed
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'userId': userId,
+          'token': token,
+          'role': 'customer', // You can make this dynamic if needed
+        }),
+      );
+    } catch (e) {
+      debugPrint('FCM token registration error: $e');
+    }
+  }
+
   Future<Map<String, dynamic>> login({
     String? email,
     String? phone,
@@ -3357,6 +3697,12 @@ class ApiService {
 
       switch (response.statusCode) {
         case 200:
+          final user = responseData['data']['user'];
+          final userId = user['id'] ??
+              user['_id']; // adjust depending on your backend format
+
+          // Call FCM token registration
+          await registerDeviceToken(userId);
           return {
             'success': true,
             'token': responseData['token'],
@@ -3522,21 +3868,25 @@ class AuthService {
 
 
 /* File: services\cart_service.dart */
+// File: services/cart_service.dart
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'auth_service.dart';
-import 'api_service.dart';
+import '../services/auth_service.dart';
 
 class CartService {
-  final String baseUrl = 'http://127.0.0.1:3001/api/cart';
+  final String baseUrl = 'http://10.0.2.2:3002/api/cart';
   final AuthService _authService = AuthService();
-  final ApiService _apiService = ApiService();
 
   Future<Map<String, dynamic>> getCart() async {
     try {
       final token = await _authService.getToken();
+
       if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
       }
 
       final response = await http.get(
@@ -3547,16 +3897,23 @@ class CartService {
         },
       );
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
       } else {
+        final errorMsg = _parseErrorMessage(response);
         return {
           'success': false,
-          'message': 'Failed to get cart: ${response.statusCode}',
+          'message': errorMsg,
         };
       }
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
     }
   }
 
@@ -3569,17 +3926,13 @@ class CartService {
   }) async {
     try {
       final token = await _authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
-      }
 
-      final body = {
-        'restaurantId': restaurantId,
-        'menuItemId': menuItemId,
-        'name': name,
-        'price': price,
-        'quantity': quantity,
-      };
+      if (token == null) {
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
+      }
 
       final response = await http.post(
         Uri.parse('$baseUrl/items'),
@@ -3587,33 +3940,46 @@ class CartService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: json.encode(body),
+        body: jsonEncode({
+          'restaurantId': restaurantId,
+          'menuItemId': menuItemId,
+          'name': name,
+          'price': price,
+          'quantity': quantity,
+        }),
       );
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
       } else {
+        final errorMsg = _parseErrorMessage(response);
         return {
           'success': false,
-          'message': 'Failed to add item to cart: ${response.statusCode}',
+          'message': errorMsg,
         };
       }
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
     }
   }
 
   Future<Map<String, dynamic>> updateCartItem(
-    String itemId,
-    int quantity,
-  ) async {
+      String itemId, int quantity) async {
     try {
       final token = await _authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
-      }
 
-      final body = {'itemId': itemId, 'quantity': quantity};
+      if (token == null) {
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
+      }
 
       final response = await http.patch(
         Uri.parse('$baseUrl/items'),
@@ -3621,27 +3987,133 @@ class CartService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: json.encode(body),
+        body: jsonEncode({
+          'itemId': itemId,
+          'quantity': quantity,
+        }),
       );
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
       } else {
+        final errorMsg = _parseErrorMessage(response);
         return {
           'success': false,
-          'message': 'Failed to update cart item: ${response.statusCode}',
+          'message': errorMsg,
         };
       }
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> clearCart() async {
+    try {
+      final token = await _authService.getToken();
+
+      if (token == null) {
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
+      }
+
+      final response = await http.delete(
+        Uri.parse('$baseUrl'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'message': 'Cart cleared successfully',
+          'data': jsonDecode(response.body),
+        };
+      } else {
+        final errorMsg = _parseErrorMessage(response);
+        return {
+          'success': false,
+          'message': errorMsg,
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
+    }
+  }
+
+// Method to checkout the cart
+  Future<Map<String, dynamic>> checkout(
+      Map<String, dynamic> checkoutData) async {
+    try {
+      final token = await _authService.getToken();
+
+      if (token == null) {
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
+      }
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/checkout'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(checkoutData),
+      );
+
+      if (response.statusCode == 201) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
+      } else {
+        final errorMsg = _parseErrorMessage(response);
+        return {
+          'success': false,
+          'message': errorMsg,
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
+    }
+  }
+
+// Make sure you have this helper method in your class
+  String _parseErrorMessage(http.Response response) {
+    try {
+      final parsedResponse = jsonDecode(response.body);
+      return parsedResponse['message'] ?? 'Unknown error occurred';
+    } catch (e) {
+      return 'Error: ${response.statusCode}';
     }
   }
 
   Future<Map<String, dynamic>> removeFromCart(String itemId) async {
     try {
       final token = await _authService.getToken();
+
       if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
       }
 
       final response = await http.delete(
@@ -3652,88 +4124,47 @@ class CartService {
         },
       );
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
       } else {
+        final errorMsg = _parseErrorMessage(response);
         return {
           'success': false,
-          'message': 'Failed to remove item from cart: ${response.statusCode}',
+          'message': errorMsg,
         };
       }
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
     }
   }
 
-  Future<Map<String, dynamic>> clearCart() async {
-    try {
-      final token = await _authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
-      }
+  Future<void> checkoutRestaurant(
+      String restaurantId, String deliveryAddress) async {
+    final token = await _authService.getToken();
 
-      final response = await http.delete(
-        Uri.parse(baseUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
-      } else {
-        return {
-          'success': false,
-          'message': 'Failed to clear cart: ${response.statusCode}',
-        };
-      }
-    } catch (e) {
-      return {'success': false, 'message': e.toString()};
-    }
-  }
-
-  Future<Map<String, dynamic>> checkout(
-    String deliveryAddress,
-    Map<String, double> deliveryLocation,
-  ) async {
-    try {
-      final token = await _authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
-      }
-
-      final body = {
+    final response = await http.post(
+      Uri.parse('$baseUrl/checkout'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: json.encode({
         'deliveryAddress': deliveryAddress,
         'deliveryLocation': {
-          'type': 'Point',
-          'coordinates': [
-            deliveryLocation['longitude'],
-            deliveryLocation['latitude'],
-          ],
+          'coordinates': [0, 0], // Replace with actual coordinates if available
         },
-      };
+        'restaurantId': restaurantId, // Send restaurantId to filter items
+      }),
+    );
 
-      final response = await http.post(
-        Uri.parse('$baseUrl/checkout'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: json.encode(body),
-      );
-
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
-      } else {
-        return {
-          'success': false,
-          'message':
-              'Failed to checkout: ${response.statusCode} ${response.body}',
-        };
-      }
-    } catch (e) {
-      return {'success': false, 'message': e.toString()};
+    if (response.statusCode != 201) {
+      throw Exception('Failed to checkout: ${response.body}');
     }
   }
 }
@@ -3749,7 +4180,7 @@ import 'auth_service.dart';
 
 class RestaurantService {
   final AuthService _authService = AuthService();
-  final String _baseUrl = ApiConstants.baseUrl;
+  final String _baseUrl = ApiConstants.restaurantBaseUrl;
 
   Future<List<Restaurant>> getNearbyRestaurants({
     required double latitude,
@@ -3785,32 +4216,20 @@ class RestaurantService {
   }
 
   Future<Restaurant> getRestaurantById(String id) async {
-    try {
-      final token = await _authService.getToken();
-      if (token == null) {
-        throw Exception('Authentication token not found');
-      }
+    final token = await _authService.getToken();
 
-      final response = await http.get(
-        Uri.parse('$_baseUrl/restaurants/$id'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+    final response = await http.get(
+      Uri.parse('$_baseUrl/$id'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    );
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        if (data['success'] == true) {
-          return Restaurant.fromJson(data['data']);
-        } else {
-          throw Exception(data['message'] ?? 'Failed to load restaurant');
-        }
-      } else {
-        throw Exception('Failed to load restaurant: ${response.statusCode}');
-      }
-    } catch (e) {
-      throw Exception('Failed to load restaurant: $e');
+    if (response.statusCode == 200) {
+      return Restaurant.fromJson(json.decode(response.body));
+    } else {
+      throw Exception('Failed to load restaurant: ${response.body}');
     }
   }
 
@@ -3971,11 +4390,11 @@ class NetworkException extends AppException {
 /* File: utils\constants.dart */
 // lib/utils/constants.dart
 class ApiConstants {
-  static const String baseUrl = 'http://127.0.0.1:3001/api';
-  static const String userBaseUrl = 'http://127.0.0.1:3000/api/users';
+  static const String baseUrl = 'http://10.0.2.2:3001/api';
+  static const String userBaseUrl = 'http://10.0.2.2:3000/api/users';
   static const String restaurantBaseUrl =
-      'http://127.0.0.1:3001/api/restaurants';
-  static const String cartBaseUrl = 'http://127.0.0.1:3001/api/cart';
+      'http://10.0.2.2:3001/api/restaurants';
+  static const String cartBaseUrl = 'http://10.0.2.2:3001/api/cart';
 }
 
 class AppConstants {
@@ -4266,62 +4685,7 @@ class MenuItemCard extends StatelessWidget {
 }
 
 
-/* File: widgets\rounded_button.dart */
-// lib/widgets/rounded_button.dart
-import 'package:flutter/material.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
-import '../theme/app_theme.dart';
-
-class RoundedButton extends StatelessWidget {
-  final String text;
-  final VoidCallback onPressed;
-  final bool isLoading;
-  final Color? backgroundColor;
-  final Color? textColor;
-  final double? height;
-  final double? width;
-  final double? borderRadius;
-
-  const RoundedButton({
-    Key? key,
-    required this.text,
-    required this.onPressed,
-    this.isLoading = false,
-    this.backgroundColor,
-    this.textColor,
-    this.height,
-    this.width,
-    this.borderRadius,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: width ?? double.infinity,
-      height: height ?? 56.h,
-      child: ElevatedButton(
-        onPressed: isLoading ? null : onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: backgroundColor ?? AppColors.primary,
-          foregroundColor: textColor ?? Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(borderRadius ?? 32.r),
-          ),
-          textStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: 18.sp),
-        ),
-        child:
-            isLoading
-                ? const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                )
-                : Text(text),
-      ),
-    );
-  }
-}
-
-
-/* File: widgets\rounded_text_field.dart */
+/* File: widgets\rouded_text_field.dart */
 // lib/widgets/rounded_text_field.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -4392,6 +4756,61 @@ class RoundedTextField extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+
+/* File: widgets\rounded_button.dart */
+// lib/widgets/rounded_button.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import '../theme/app_theme.dart';
+
+class RoundedButton extends StatelessWidget {
+  final String text;
+  final VoidCallback onPressed;
+  final bool isLoading;
+  final Color? backgroundColor;
+  final Color? textColor;
+  final double? height;
+  final double? width;
+  final double? borderRadius;
+
+  const RoundedButton({
+    Key? key,
+    required this.text,
+    required this.onPressed,
+    this.isLoading = false,
+    this.backgroundColor,
+    this.textColor,
+    this.height,
+    this.width,
+    this.borderRadius,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width ?? double.infinity,
+      height: height ?? 56.h,
+      child: ElevatedButton(
+        onPressed: isLoading ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: backgroundColor ?? AppColors.primary,
+          foregroundColor: textColor ?? Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(borderRadius ?? 32.r),
+          ),
+          textStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: 18.sp),
+        ),
+        child:
+            isLoading
+                ? const CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                )
+                : Text(text),
+      ),
     );
   }
 }

@@ -1,6 +1,6 @@
-
 import 'dart:convert';
 
+import 'package:client_customer/screens/restaurant/restaurant_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +17,8 @@ import 'screens/home/home_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'theme/app_theme.dart';
 import 'screens/onboarding/onboarding1_screen.dart';
+import 'screens/cart/cart_screen.dart';
+import 'screens/cart/checkout_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,20 +26,20 @@ void main() async {
   await Firebase.initializeApp(); // Ensure firebase is initialized
 
   Future<void> testRegisterToken(String userId) async {
-  final fcmToken = await FirebaseMessaging.instance.getToken();
-  if (fcmToken != null) {
-    await http.post(
-      Uri.parse('http://10.0.2.2:5000/api/notifications/register'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'userId': userId,
-        'token': fcmToken,
-        'role': 'customer',
-      }),
-    );
-    print("✅ Token registered: $fcmToken");
+    final fcmToken = await FirebaseMessaging.instance.getToken();
+    if (fcmToken != null) {
+      await http.post(
+        Uri.parse('http://10.0.2.2:5000/api/notifications/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'userId': userId,
+          'token': fcmToken,
+          'role': 'customer',
+        }),
+      );
+      print("✅ Token registered: $fcmToken");
+    }
   }
-}
 
   final authService = AuthService();
   final token = await authService.getToken();
@@ -51,14 +53,11 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(
-          create:
-              (_) =>
-                  AuthProvider()
-                    ..setToken(token ?? '')
-                    ..setUser(
-                      initialUser ??
-                          User(id: '', name: '', email: '', role: ''),
-                    ),
+          create: (_) => AuthProvider()
+            ..setToken(token ?? '')
+            ..setUser(
+              initialUser ?? User(id: '', name: '', email: '', role: ''),
+            ),
         ),
         ChangeNotifierProvider(create: (_) => CartProvider()),
         ChangeNotifierProvider(create: (_) => RestaurantProvider()),
@@ -82,8 +81,7 @@ class MyApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           home: Consumer<AuthProvider>(
             builder: (context, authProvider, _) {
-              final isCustomer =
-                  authProvider.user != null &&
+              final isCustomer = authProvider.user != null &&
                   authProvider.user!.role == 'customer';
               return (authProvider.isAuth && isCustomer)
                   ? const HomeScreen()
@@ -94,6 +92,13 @@ class MyApp extends StatelessWidget {
             '/login': (context) => const LoginScreen(),
             '/register': (context) => const RegisterScreen(),
             '/home': (context) => const HomeScreen(),
+            '/restaurant': (context) => RestaurantDetailScreen(
+                  restaurantId:
+                      ModalRoute.of(context)!.settings.arguments as String,
+                ),
+            '/cart': (context) => const CartScreen(), // Add this line
+            '/checkout': (context) =>
+                const CheckoutScreen(), // Add this if you have a checkout screen
           },
         );
       },

@@ -122,7 +122,7 @@ packages:
     source: hosted
     version: "4.5.37"
   firebase_messaging_web:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: firebase_messaging_web
       sha256: "90dc7ed885e90a24bb0e56d661d4d2b5f84429697fd2cbb9e5890a0ca370e6f4"
@@ -288,6 +288,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.0"
+  payhere_mobilesdk_flutter:
+    dependency: "direct main"
+    description:
+      name: payhere_mobilesdk_flutter
+      sha256: "266eb398e4aa6c888134bc2b09abdc27c6e82ddcbc6bea7094e7cb408dcc7b5a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.1"
   platform:
     dependency: transitive
     description:
@@ -462,5 +470,5 @@ packages:
     source: hosted
     version: "1.1.0"
 sdks:
-  dart: ">=3.7.0 <4.0.0"
+  dart: ">=3.7.0 <=3.7.2"
   flutter: ">=3.27.0"

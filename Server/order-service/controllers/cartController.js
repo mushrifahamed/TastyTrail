@@ -5,6 +5,36 @@ const paymentService = require("../services/paymentService");
 const estimationService = require("../services/estimationService");
 const orderSplitter = require("../services/orderSplitter");
 const Order = require("../models/Order");
+const amqp = require("amqplib/callback_api");
+
+// Function to publish the order created event to RabbitMQ
+const publishOrderCreatedEvent = (orderId) => {
+  amqp.connect("amqp://localhost", (error, connection) => {
+    if (error) {
+      console.error("RabbitMQ connection error:", error);
+      return;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        console.error("RabbitMQ channel error:", error);
+        return;
+      }
+
+      const queue = "order_created_queue";
+      const msg = JSON.stringify({ orderId });
+
+      channel.assertQueue(queue, { durable: true });
+      channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
+
+      console.log(`Order Created Event Sent: ${msg}`);
+    });
+
+    setTimeout(() => {
+      connection.close();
+    }, 500);
+  });
+};
 
 // Get cart contents
 const getCart = async (req, res, next) => {
@@ -271,6 +301,118 @@ const checkoutCart = async (req, res, next) => {
   }
 };
 
+// Checkout items from a specific restaurant only - NEW FUNCTION
+const checkoutRestaurant = async (req, res, next) => {
+  try {
+    const customerId = req.user.id;
+    const { restaurantId, deliveryAddress } = req.body;
+    const token = req.headers.authorization?.split(" ")[1];
+
+    // Use default delivery location if not provided
+    const deliveryLocation = req.body.deliveryLocation || { lat: 0, lng: 0 };
+
+    const cart = await Cart.findOne({ customerId });
+    if (!cart || cart.items.length === 0) {
+      return res.status(400).json({ message: "Cart is empty" });
+    }
+
+    // Filter for items only from the specified restaurant
+    const restaurantItems = cart.items.filter(
+      (item) => item.restaurantId.toString() === restaurantId.toString()
+    );
+
+    if (restaurantItems.length === 0) {
+      return res.status(400).json({
+        message: "No items found for this restaurant in your cart",
+      });
+    }
+
+    // Get customer info from user service
+    let customerInfo;
+    try {
+      customerInfo = await userService.getUserInfo(customerId, token);
+    } catch (error) {
+      console.error("Failed to get user info, using fallback data:", error);
+      customerInfo = {
+        name: "Customer",
+        phone: "Unknown",
+      };
+    }
+
+    // Calculate total amount for this restaurant's items
+    const totalAmount = orderSplitter.calculateOrderTotal(restaurantItems);
+
+    // Calculate estimated delivery time
+    const estimatedTime = await estimationService.calculateEstimatedTime(
+      restaurantItems,
+      deliveryLocation,
+      [restaurantId]
+    );
+
+    // Create order for this restaurant
+    const order = new Order({
+      customerId,
+      customerInfo: {
+        name: customerInfo.name || "Customer",
+        phone: customerInfo.phone || "Unknown",
+      },
+      items: restaurantItems,
+      deliveryAddress,
+      deliveryLocation,
+      totalAmount,
+      paymentStatus: "pending",
+      estimatedDeliveryTime: estimatedTime,
+      trackingStatus: "placed",
+      statusUpdates: [
+        {
+          status: "placed",
+          timestamp: Date.now(),
+          note: "Order placed successfully",
+        },
+      ],
+      restaurantId,
+    });
+
+    // Save the order
+    const savedOrder = await order.save();
+
+    // Initiate payment process for this order
+    const paymentResponse = await paymentService.createPayment(
+      savedOrder._id,
+      totalAmount,
+      customerId,
+      `Order #${savedOrder._id} for restaurant ${restaurantId}`,
+      token
+    );
+
+    // Update order with payment ID
+    savedOrder.paymentId = paymentResponse.paymentId;
+    await savedOrder.save();
+
+    // Publish the order created event to RabbitMQ
+    publishOrderCreatedEvent(savedOrder._id);
+
+    // IMPORTANT FIX: Remove ONLY the items from this restaurant
+    cart.items = cart.items.filter(
+      (item) => item.restaurantId.toString() !== restaurantId.toString()
+    );
+    await cart.save();
+
+    res.status(201).json({
+      message: "Order created successfully",
+      order: savedOrder,
+      payment: {
+        paymentId: paymentResponse.paymentId,
+        checkoutUrl: paymentResponse.checkoutUrl,
+        paymentParams: paymentResponse.paymentParams,
+      },
+      cart: cart, // Return the updated cart with remaining items
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getCart,
   addToCart,
@@ -278,4 +420,5 @@ module.exports = {
   removeFromCart,
   clearCart,
   checkoutCart,
+  checkoutRestaurant, // Export the new function
 };

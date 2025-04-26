@@ -7,6 +7,7 @@ const {
   removeFromCart,
   clearCart,
   checkoutCart,
+  checkoutRestaurant,
 } = require("../controllers/cartController");
 const authMiddleware = require("../utils/authMiddleware");
 
@@ -19,6 +20,6 @@ router.post("/items", addToCart);
 router.patch("/items", updateCartItem);
 router.delete("/items/:itemId", removeFromCart);
 router.delete("/", clearCart);
-router.post("/checkout", checkoutCart);
+router.post("/checkout", checkoutRestaurant);
 
 module.exports = router;
