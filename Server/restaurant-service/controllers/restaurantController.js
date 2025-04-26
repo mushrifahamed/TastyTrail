@@ -339,4 +339,7 @@ module.exports = {
   getAllRestaurants,
   manageMenu,
   searchRestaurants,
+
+
 };
+

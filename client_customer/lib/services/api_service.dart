@@ -2,13 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:client_customer/models/restaurant.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 
 class ApiService {
-  static const String _userBaseUrl = 'http://127.0.0.1:3000/api/users';
+  static const String _userBaseUrl = 'http://10.0.2.2:3000/api/users';
   static const String _restaurantBaseUrl =
-      'http://127.0.0.1:3001/api/restaurants';
+      'http://10.0.2.2:3001/api/restaurants';
 
   Future<Map<String, dynamic>> register({
     required String name,
@@ -95,8 +96,7 @@ class ApiService {
       // Handle other status codes
       return {
         'success': false,
-        'message':
-            responseData['message'] ??
+        'message': responseData['message'] ??
             'Registration failed with status ${response.statusCode}',
         'errorCode': responseData['errorCode'] ?? 'server_error',
         'statusCode': response.statusCode,
@@ -140,6 +140,26 @@ class ApiService {
     }
   }
 
+  Future<void> registerDeviceToken(String userId) async {
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token == null) return;
+
+      await http.post(
+        Uri.parse(
+            'http://10.0.2.2:5000/api/notifications/register'), // Replace port if needed
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'userId': userId,
+          'token': token,
+          'role': 'customer', // You can make this dynamic if needed
+        }),
+      );
+    } catch (e) {
+      debugPrint('FCM token registration error: $e');
+    }
+  }
+
   Future<Map<String, dynamic>> login({
     String? email,
     String? phone,
@@ -172,6 +192,12 @@ class ApiService {
 
       switch (response.statusCode) {
         case 200:
+          final user = responseData['data']['user'];
+          final userId = user['id'] ??
+              user['_id']; // adjust depending on your backend format
+
+          // Call FCM token registration
+          await registerDeviceToken(userId);
           return {
             'success': true,
             'token': responseData['token'],
