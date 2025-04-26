@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import api from "../../utils/api";
+import { userServiceApi, restaurantServiceApi } from '../../utils/api';
 import { AuthContext } from "../../context/AuthContext";
 
 const AdminDashboard = () => {
@@ -16,10 +16,10 @@ const AdminDashboard = () => {
       try {
         const [usersRes, restaurantAdminsRes, deliveryRes, pendingRes] =
           await Promise.all([
-            api.get("/api/users?role=customer"),
-            api.get("/api/users?role=restaurant_admin"),
-            api.get("/api/users?role=delivery_personnel"),
-            api.get("/api/users?status=pending"),
+            userServiceApi.get("/api/users?role=customer"),
+            userServiceApi.get("/api/users?role=restaurant_admin"),
+            userServiceApi.get("/api/users?role=delivery_personnel"),
+            userServiceApi.get("/api/users?status=pending"),
           ]);
 
         setStats({

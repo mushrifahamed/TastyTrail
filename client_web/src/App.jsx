@@ -1,4 +1,3 @@
-
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import Layout from "./components/Layout";
@@ -7,6 +6,7 @@ import RestaurantAdminRequest from "./pages/Auth/RestaurantAdminRequest";
 import AdminDashboard from "./pages/admin/Dashboard";
 import AdminUsers from "./pages/admin/Users";
 import AdminRestaurantAdmins from "./pages/admin/RestaurantAdmins";
+import RestaurantManagement from "./pages/admin/RestaurantManagement";
 import AdminDeliveryPersonnel from "./pages/admin/DeliveryPersonnel";
 import RestaurantAdminDashboard from "./pages/restaurant-admin/Dashboard";
 import RestaurantAdminProfile from "./pages/restaurant-admin/Profile";
@@ -40,6 +40,10 @@ function App() {
               <Route
                 path="delivery-personnel"
                 element={<AdminDeliveryPersonnel />}
+              />
+              <Route
+                path="restaurant-management"
+                element={<RestaurantManagement />}
               />
             </Route>
           </Route>

@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import api from "../../utils/api";
+import {userServiceApi, restaurantServiceApi} from "../../utils/api";
 import { AuthContext } from "../../context/AuthContext";
 
 const RestaurantAdminDashboard = () => {

@@ -1,50 +1,154 @@
+const axios = require("axios");
 const Restaurant = require("../models/restaurantModel");
 const { calculateDistance } = require("../utils/geolocation");
 const upload = require("../config/multerConfig");
 
-// Add new restaurant with cover image and multiple menu item images
 const addRestaurant = async (req, res) => {
-  const { name, description, address, menu, operatingHours, menuItemNames } =
-    req.body;
-
-  // Handle file upload for the cover image
-  const coverImage = req.file ? req.file.path : null; // Store the cover image file path
-
-  // Handle file upload for menu item images (multiple files)
-  const menuItemImages = req.files; // Multer will upload multiple files as an array in `req.files`
+  console.log('Request body:', req.body); // Debugging log
+  console.log('Request files:', req.files); // Debugging log
 
   try {
-    // Check if restaurant already exists
-    const existingRestaurant = await Restaurant.findOne({ name });
-    if (existingRestaurant) {
-      return res.status(400).json({ message: "Restaurant already exists" });
+    // Parse the incoming data (handling both stringified and direct objects)
+    const name = req.body.name;
+    const description = req.body.description;
+    
+    const address = typeof req.body.address === 'string' 
+      ? JSON.parse(req.body.address) 
+      : req.body.address;
+    
+    const operatingHours = typeof req.body.operatingHours === 'string'
+      ? JSON.parse(req.body.operatingHours)
+      : req.body.operatingHours;
+    
+    let menu = [];
+    try {
+      menu = typeof req.body.menu === 'string'
+        ? JSON.parse(req.body.menu)
+        : req.body.menu || [];
+      
+      if (!Array.isArray(menu)) {
+        throw new Error('Menu must be an array');
+      }
+    } catch (err) {
+      console.error("Error parsing menu:", err);
+      return res.status(400).json({ message: "Invalid menu format" });
     }
 
-    // Create a new restaurant instance
-    const newRestaurant = new Restaurant({
-      name,
-      description,
-      address,
-      menu,
-      operatingHours,
-      availability: true, // Default availability is true
-      coverImage, // Save the cover image URL/path
-    });
-
-    // For each menu item, associate the uploaded image
-    if (menuItemImages) {
-      menu.forEach((menuItem, index) => {
-        if (menuItemImages[index]) {
-          menuItem.image = menuItemImages[index].path; // Assign image path to each menu item
+    // Validate required fields
+    if (!name || !address) {
+      return res.status(400).json({ 
+        message: "Name and address are required",
+        details: {
+          received: { name, address }
         }
       });
     }
 
-    // Save the new restaurant
+    // Validate address structure
+    if (!address.geoCoordinates || 
+        typeof address.geoCoordinates !== 'object' ||
+        isNaN(parseFloat(address.geoCoordinates.longitude)) || 
+        isNaN(parseFloat(address.geoCoordinates.latitude))) {
+      return res.status(400).json({ 
+        message: "Valid geo coordinates are required",
+        details: {
+          receivedCoordinates: address.geoCoordinates
+        }
+      });
+    }
+
+    // Check if restaurant already exists
+    const existingRestaurant = await Restaurant.findOne({ name });
+    if (existingRestaurant) {
+      return res.status(400).json({ 
+        message: "Restaurant already exists",
+        existingId: existingRestaurant._id
+      });
+    }
+
+    // Handle file uploads
+    const coverImage = req.files?.coverImage?.[0]?.path || null;
+    const menuItemImages = req.files?.menuItemImages || [];
+
+    // Validate menu items match uploaded images
+    if (menuItemImages.length > 0 && menuItemImages.length !== menu.length) {
+      console.warn(`Mismatch: ${menuItemImages.length} images for ${menu.length} menu items`);
+    }
+
+    // Create new restaurant with proper data types
+    const newRestaurant = new Restaurant({
+      name: name.trim(),
+      description: description ? description.trim() : '',
+      address: {
+        street: address.street ? address.street.trim() : '',
+        city: address.city ? address.city.trim() : '',
+        country: address.country ? address.country.trim() : '',
+        geoCoordinates: {
+          type: "Point",
+          coordinates: [
+            parseFloat(address.geoCoordinates.longitude),
+            parseFloat(address.geoCoordinates.latitude)
+          ],
+        }
+      },
+      menu: menu.map((item, index) => ({
+        name: item.name ? item.name.trim() : `Item ${index + 1}`,
+        description: item.description ? item.description.trim() : '',
+        price: parseFloat(item.price) || 0,
+        category: item.category ? item.category.trim() : 'other',
+        image: menuItemImages[index]?.path || null
+      })),
+      operatingHours: {
+        from: operatingHours?.from || '09:00',
+        to: operatingHours?.to || '21:00'
+      },
+      availability: true,
+      coverImage,
+    });
+
+    // Validate the restaurant document before saving
+    const validationError = newRestaurant.validateSync();
+    if (validationError) {
+      return res.status(400).json({
+        message: "Validation failed",
+        error: validationError.message,
+        details: validationError.errors
+      });
+    }
+
     await newRestaurant.save();
-    res.status(201).json(newRestaurant);
+
+    res.status(201).json({
+      status: "success",
+      data: {
+        restaurant: newRestaurant,
+      },
+    });
   } catch (err) {
-    res.status(500).json({ message: "Error creating restaurant", err });
+    console.error("Error creating restaurant:", err);
+    
+    // Handle duplicate key errors separately
+    if (err.code === 11000) {
+      return res.status(400).json({ 
+        message: "Restaurant with this name already exists",
+        error: err.message
+      });
+    }
+    
+    // Handle validation errors
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({
+        message: "Validation failed",
+        error: err.message,
+        details: err.errors
+      });
+    }
+
+    res.status(500).json({ 
+      message: "Error creating restaurant",
+      error: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 };
 
@@ -145,6 +249,28 @@ const getRestaurantById = async (req, res) => {
   }
 };
 
+//get all restaurants
+const getAllRestaurants = async (req, res) => {
+  try {
+    // Fetch all restaurants from the database
+    const restaurants = await Restaurant.find(); // You can add query filters if needed
+    
+    if (restaurants.length === 0) {
+      return res.status(404).json({ message: "No restaurants found" });
+    }
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        restaurants, // Return the list of restaurants
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching restaurants:", err);
+    res.status(500).json({ message: "Error fetching restaurants", err });
+  }
+};
+
 // Manage menu items (add/update/remove items with images)
 const manageMenu = async (req, res) => {
   const { restaurantId, action, menuItemId, menuItem } = req.body;
@@ -204,46 +330,16 @@ const searchRestaurants = async (req, res) => {
   }
 };
 
-const getRestaurantAvailability = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const restaurant = await Restaurant.findById(id);
-
-    if (!restaurant) {
-      return res.status(404).json({ message: "Restaurant not found" });
-    }
-
-    res.status(200).json({
-      restaurantId: restaurant._id,
-      isAvailable: restaurant.availability,
-    });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ message: "Error checking restaurant availability", err });
-  }
-};
-
-const getRestaurantById = async (req, res) => {
-  try {
-    const restaurant = await Restaurant.findById(req.params.id);
-    if (!restaurant) {
-      return res.status(404).json({ message: "Restaurant not found" });
-    }
-    res.status(200).json(restaurant);
-  } catch (err) {
-    res.status(500).json({ message: "Error fetching restaurant", err });
-  }
-};
-
 module.exports = {
   addRestaurant,
   getNearbyRestaurants,
   toggleAvailability,
   getRestaurantAvailability,
   getRestaurantById,
+  getAllRestaurants,
   manageMenu,
   searchRestaurants,
-  getRestaurantAvailability,
-  getRestaurantById,
+
+
 };
+

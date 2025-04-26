@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import api from "../../utils/api";
+import { userServiceApi } from "../../utils/api"; // Import userServiceApi
 import { AuthContext } from "../../context/AuthContext";
 
 const AdminRestaurantAdmins = () => {
@@ -11,7 +11,7 @@ const AdminRestaurantAdmins = () => {
   useEffect(() => {
     const fetchAdmins = async () => {
       try {
-        const response = await api.get("/api/users?role=restaurant_admin");
+        const response = await userServiceApi.get("/api/users?role=restaurant_admin");
         setAdmins(response.data.users);
       } catch (err) {
         setError(err.response?.data?.message || "Failed to fetch admins");
@@ -25,7 +25,7 @@ const AdminRestaurantAdmins = () => {
 
   const approveAdmin = async (userId, restaurantId) => {
     try {
-      await api.patch("/api/users/restaurant-admin/approve", {
+      await userServiceApi.patch("/api/users/restaurant-admin/approve", {
         userId,
         restaurantId,
       });
