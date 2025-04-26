@@ -6,6 +6,8 @@ const http = require('http');
 const socketIo = require('socket.io');
 const messageBroker = require('./utils/messagebroker_neworder'); // Correctly import your message broker
 const deliveryRoutes = require('./routes/deliveryRoutes'); // Delivery routes
+const RegmessageBroker = require('./utils/delivery_person_register_Listner'); // Use the correct file
+
 
 const app = express();
 
@@ -14,6 +16,8 @@ connectDB();
 
 // Start listening for new orders from RabbitMQ
 messageBroker.listenForNewOrders(); // Make sure listenForNewOrders() is implemented correctly
+// Start listening for delivery person registration events
+RegmessageBroker.listenForDeliveryPersonRegistration(); // Make sure listenForDeliveryPersonRegistration() is implemented correctly
 
 // Create server and setup socket.io
 const server = http.createServer(app);

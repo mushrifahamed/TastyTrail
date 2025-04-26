@@ -5,12 +5,13 @@ const authService = require("../services/authService");
 const { sendEmail } = require("../services/emailService");
 const passwordUtils = require("../utils/passwordUtils");
 const { JWT_SECRET, JWT_EXPIRES_IN } = process.env;
+const amqp = require('amqplib/callback_api');
 
 // ==================== TOKEN VERIFICATION ====================
 const verifyToken = async (req, res, next) => {
   try {
     // Get token from header
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization?.split(' ')[1]; 
     
     if (!token) {
       return res.status(401).json({ message: 'No token provided' });
@@ -313,16 +314,18 @@ const registerCustomer = async (req, res, next) => {
 };
 
 // ==================== DELIVERY PERSONNEL METHODS ====================
+// Function to register a new Delivery Person
 const registerDeliveryPerson = async (req, res, next) => {
   try {
-    const { name, phone, nicOrLicense, vehicleType, vehicleNumber } = req.body;
-    const documents = req.files?.map((file) => file.path); // Assuming you're using multer
+    const { name, phone, nicOrLicense, vehicleType, vehicleNumber, documents } = req.body;
 
+    // Check if the phone number is already in use
     const existingUser = await User.findOne({ phone });
     if (existingUser) {
       return res.status(400).json({ message: "Phone number already in use" });
     }
 
+    // Create the new delivery person in the User model
     const deliveryPerson = await User.create({
       name,
       phone,
@@ -332,21 +335,18 @@ const registerDeliveryPerson = async (req, res, next) => {
         type: vehicleType,
         number: vehicleNumber,
       },
-      documents,
-      status: "pending",
-      isActive: false,
-      phoneVerified: true, // Automatically verify phone without OTP
+      documents,  // URL paths to the uploaded documents
+      status: "pending",  // Default status for delivery person (needs approval)
+      isActive: false,  // Default is inactive until approved
+      phoneVerified: true,  // Assuming phone is verified automatically
     });
 
-    // // Notify admin about new delivery person registration
-    // await notificationService.sendAdminNotification(
-    //   "New delivery person registration",
-    //   `New delivery person ${name} registered and pending approval`
-    // );
+    // Publish the event to RabbitMQ after the delivery person is created
+    publishDeliveryPersonEvent(deliveryPerson);
 
     res.status(201).json({
       status: "success",
-      message: "Registration submitted for approval",
+      message: "Delivery person registration submitted for approval",
       data: {
         user: {
           _id: deliveryPerson._id,
@@ -359,6 +359,45 @@ const registerDeliveryPerson = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+};
+
+// Function to publish a message to RabbitMQ when a delivery person registers
+const publishDeliveryPersonEvent = (deliveryPerson) => {
+  amqp.connect('amqp://localhost', (error, connection) => {
+    if (error) {
+      throw error;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        throw error;
+      }
+
+      const queue = 'delivery_person_registered_queue';  // Queue for delivery person registration
+      const message = JSON.stringify({
+        deliveryPersonId: deliveryPerson._id,
+        name: deliveryPerson.name,
+        phone: deliveryPerson.phone,
+        vehicleType: deliveryPerson.vehicleInfo.type,
+        vehicleLicensePlate: deliveryPerson.vehicleInfo.number,
+      });
+
+      // Make sure the queue exists and then publish the message
+      channel.assertQueue(queue, { durable: true });
+      channel.sendToQueue(queue, Buffer.from(message), { persistent: true });
+
+      console.log(`Published delivery person registration event: ${message}`);
+    });
+
+    setTimeout(() => {
+      connection.close();
+    }, 500);
+  });
+};
+
+module.exports = {
+  registerDeliveryPerson,
+  // other methods...
 };
 
 const approveDeliveryPerson = async (req, res, next) => {
