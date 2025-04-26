@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import api from "../../utils/api";
+import {userServiceApi} from "../../utils/api";
 import { AuthContext } from "../../context/AuthContext";
 
 const AdminUsers = () => {
@@ -12,7 +12,7 @@ const AdminUsers = () => {
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const response = await api.get("/api/users");
+        const response = await userServiceApi.get("/api/users");
         setUsers(response.data.data.users);
       } catch (err) {
         setError(err.response?.data?.message || "Failed to fetch users");
@@ -26,7 +26,7 @@ const AdminUsers = () => {
 
   const toggleUserStatus = async (userId, isActive) => {
     try {
-      await api.patch(`/api/users/${userId}`, { isActive: !isActive });
+      await userServiceApi.patch(`/api/users/${userId}`, { isActive: !isActive });
       setUsers(
         users.map((user) =>
           user._id === userId ? { ...user, isActive: !isActive } : user

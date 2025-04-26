@@ -1,8 +1,13 @@
+// lib/screens/home/home_screen.dart
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../models/restaurant.dart';
-import '../../services/api_service.dart';
+import '../../providers/restaurant_provider.dart';
+import '../../providers/cart_provider.dart';
 import '../../theme/app_theme.dart';
 import '../restaurant/restaurant_screen.dart';
+import '../cart/cart_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,127 +17,136 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late Future<List<Restaurant>> _restaurantsFuture;
-  final ApiService _apiService = ApiService();
+  int _selectedIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _restaurantsFuture = _apiService.getNearbyRestaurants(
-      12.9916, // Example latitude
-      77.5946, // Example longitude
-      5, // 5km radius
-    );
+    _loadRestaurants();
+  }
+
+  Future<void> _loadRestaurants() async {
+    // In a real app, you would get the user's location
+    await Provider.of<RestaurantProvider>(
+      context,
+      listen: false,
+    ).fetchNearbyRestaurants(latitude: 12.9716, longitude: 77.5946, radius: 5);
+  }
+
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: Column(
-        children: [
-          // Top header with Unsplash image background
-          Stack(
+      body: _selectedIndex == 0 ? _buildHomeContent() : const CartScreen(),
+      bottomNavigationBar: BottomNavigationBar(
+        items: const <BottomNavigationBarItem>[
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.shopping_cart),
+            label: 'Cart',
+          ),
+        ],
+        currentIndex: _selectedIndex,
+        selectedItemColor: AppColors.primary,
+        onTap: _onItemTapped,
+      ),
+    );
+  }
+
+  Widget _buildHomeContent() {
+    return Column(
+      children: [
+        // Header with gradient background
+        Container(
+          padding: EdgeInsets.fromLTRB(16.w, 50.h, 16.w, 20.h),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [AppColors.primary, AppColors.primary.withOpacity(0.8)],
+            ),
+            borderRadius: BorderRadius.only(
+              bottomLeft: Radius.circular(24.r),
+              bottomRight: Radius.circular(24.r),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                height: 170,
-                width: double.infinity,
-                decoration: const BoxDecoration(
-                  image: DecorationImage(
-                    image: NetworkImage(
-                      'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80',
-                    ),
-                    fit: BoxFit.cover,
-                  ),
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.black.withOpacity(0.3),
-                        Colors.black.withOpacity(0.1),
-                        Colors.transparent,
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      "Flavor Town, Gastronomia",
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
+                  IconButton(
+                    icon: const Icon(Icons.search, color: Colors.white),
+                    onPressed: () {},
+                  ),
+                ],
               ),
-              Container(
-                height: 170,
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(24, 40, 24, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "TastyTrail",
-                      style: Theme.of(
-                        context,
-                      ).textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on, color: Colors.white),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            "Flavor Town, Gastronomia",
-                            style: Theme.of(
-                              context,
-                            ).textTheme.titleMedium?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.search, color: Colors.white),
-                          onPressed: () {},
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "Discover the best restaurants near you!",
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                  ],
+              SizedBox(height: 10.h),
+              Text(
+                "Discover the best restaurants near you!",
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w400,
                 ),
               ),
             ],
           ),
-          // Body
-          Expanded(
-            child: FutureBuilder<List<Restaurant>>(
-              future: _restaurantsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
-                if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                  return const Center(child: Text('No restaurants found'));
-                }
-                final restaurants = snapshot.data!;
-                restaurants.sort(
-                  (a, b) => (a.distance ?? 0).compareTo(b.distance ?? 0),
+        ),
+        // Body
+        Expanded(
+          child: Consumer<RestaurantProvider>(
+            builder: (context, restaurantProvider, _) {
+              if (restaurantProvider.isLoading) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              if (restaurantProvider.errorMessage != null) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('Error: ${restaurantProvider.errorMessage}'),
+                      SizedBox(height: 16.h),
+                      ElevatedButton(
+                        onPressed: _loadRestaurants,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
                 );
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 16,
+              }
+
+              final restaurants = restaurantProvider.restaurants;
+              if (restaurants.isEmpty) {
+                return const Center(child: Text('No restaurants found'));
+              }
+
+              // Sort restaurants by distance
+              restaurants.sort(
+                (a, b) => (a.distance ?? 0).compareTo(b.distance ?? 0),
+              );
+
+              return RefreshIndicator(
+                onRefresh: _loadRestaurants,
+                child: ListView.builder(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 16.w,
+                    vertical: 16.h,
                   ),
                   itemCount: restaurants.length,
                   itemBuilder: (context, index) {
@@ -152,12 +166,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       },
                     );
                   },
-                );
-              },
-            ),
+                ),
+              );
+            },
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -173,23 +187,23 @@ class _RestaurantCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 28),
+        margin: EdgeInsets.only(bottom: 28.h),
         child: Column(
           children: [
             // Cover image, full width, curved top
             ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(28),
-                topRight: Radius.circular(28),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(28.r),
+                topRight: Radius.circular(28.r),
               ),
               child: Image.network(
                 restaurant.coverImage,
                 width: double.infinity,
-                height: 170,
+                height: 170.h,
                 fit: BoxFit.cover,
                 errorBuilder:
                     (_, __, ___) => Container(
-                      height: 170,
+                      height: 170.h,
                       color: Colors.grey[200],
                       child: const Icon(Icons.restaurant, size: 40),
                     ),
@@ -198,21 +212,21 @@ class _RestaurantCard extends StatelessWidget {
             // Details tile, full width, curved bottom
             Container(
               width: double.infinity,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(28),
-                  bottomRight: Radius.circular(28),
+                  bottomLeft: Radius.circular(28.r),
+                  bottomRight: Radius.circular(28.r),
                 ),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black12,
                     blurRadius: 10,
-                    offset: Offset(0, 4),
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
-              padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+              padding: EdgeInsets.fromLTRB(24.w, 16.h, 24.w, 16.h),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -223,7 +237,7 @@ class _RestaurantCard extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  SizedBox(height: 6.h),
                   Text(
                     restaurant.description,
                     style: Theme.of(
@@ -232,15 +246,15 @@ class _RestaurantCard extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 10),
+                  SizedBox(height: 10.h),
                   Row(
                     children: [
                       Icon(
                         Icons.location_on,
                         color: AppColors.primary,
-                        size: 18,
+                        size: 18.sp,
                       ),
-                      const SizedBox(width: 4),
+                      SizedBox(width: 4.w),
                       Text(
                         restaurant.distance != null
                             ? "${restaurant.distance!.toStringAsFixed(2)} km"
@@ -250,13 +264,13 @@ class _RestaurantCard extends StatelessWidget {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                      const SizedBox(width: 16),
+                      SizedBox(width: 16.w),
                       Icon(
                         Icons.access_time,
                         color: AppColors.primary,
-                        size: 18,
+                        size: 18.sp,
                       ),
-                      const SizedBox(width: 4),
+                      SizedBox(width: 4.w),
                       Text(
                         restaurant.operatingHours != null
                             ? "${restaurant.operatingHours!.from ?? '??'} - ${restaurant.operatingHours!.to ?? '??'}"

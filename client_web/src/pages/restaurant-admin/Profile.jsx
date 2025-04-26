@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import api from "../../utils/api";
+import { userServiceApi } from "../../utils/api";
 import { AuthContext } from "../../context/AuthContext";
 
 const RestaurantAdminProfile = () => {
@@ -18,7 +18,7 @@ const RestaurantAdminProfile = () => {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const response = await api.get("/api/users/me");
+        const response = await userServiceApi.get("/api/users/me");
         setProfile(response.data.user);
         setFormData({
           name: response.data.user.name,
@@ -46,7 +46,7 @@ const RestaurantAdminProfile = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await api.patch("/api/users/update-me", formData);
+      const response = await userServiceApi.patch("/api/users/update-me", formData);
       setProfile(response.data.user);
       setEditMode(false);
     } catch (err) {

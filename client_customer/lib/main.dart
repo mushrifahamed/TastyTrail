@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 
 import 'package:firebase_core/firebase_core.dart';
@@ -5,8 +6,10 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'providers/auth_provider.dart';
+import 'providers/cart_provider.dart';
+import 'providers/restaurant_provider.dart';
 import 'services/auth_service.dart';
 import 'models/user.dart';
 import 'screens/auth/login_screen.dart';
@@ -57,6 +60,8 @@ void main() async {
                           User(id: '', name: '', email: '', role: ''),
                     ),
         ),
+        ChangeNotifierProvider(create: (_) => CartProvider()),
+        ChangeNotifierProvider(create: (_) => RestaurantProvider()),
       ],
       child: const MyApp(),
     ),
@@ -68,22 +73,29 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
-    final isCustomer =
-        authProvider.user != null && authProvider.user!.role == 'customer';
-
-    return MaterialApp(
-      title: 'Food Delivery App',
-      theme: AppTheme.lightTheme,
-      debugShowCheckedModeBanner: false,
-      home:
-          (authProvider.isAuth && isCustomer)
-              ? const HomeScreen()
-              : const Onboarding1Screen(),
-      routes: {
-        '/login': (context) => const LoginScreen(),
-        '/register': (context) => const RegisterScreen(),
-        '/home': (context) => const HomeScreen(),
+    return ScreenUtilInit(
+      designSize: const Size(360, 690),
+      builder: (context, child) {
+        return MaterialApp(
+          title: 'Food Delivery App',
+          theme: AppTheme.lightTheme,
+          debugShowCheckedModeBanner: false,
+          home: Consumer<AuthProvider>(
+            builder: (context, authProvider, _) {
+              final isCustomer =
+                  authProvider.user != null &&
+                  authProvider.user!.role == 'customer';
+              return (authProvider.isAuth && isCustomer)
+                  ? const HomeScreen()
+                  : const Onboarding1Screen();
+            },
+          ),
+          routes: {
+            '/login': (context) => const LoginScreen(),
+            '/register': (context) => const RegisterScreen(),
+            '/home': (context) => const HomeScreen(),
+          },
+        );
       },
     );
   }

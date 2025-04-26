@@ -14,8 +14,8 @@ const adminLinks = [
   { name: "Dashboard", path: "/admin", icon: <MdDashboard /> },
   { name: "Users", path: "/admin/users", icon: <MdPeople /> },
   {
-    name: "Restaurant Admins",
-    path: "/admin/restaurant-admins",
+    name: "Restaurant Management",  // Changed text from 'Restaurant Admins' to 'Restaurant Management'
+    path: "/admin/restaurant-management",
     icon: <MdRestaurant />,
   },
   {
