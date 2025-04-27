@@ -3,7 +3,8 @@ const DeliveryPerson = require('../models/deliveryPerson');
 const Order = require('../models/orders');
 
 const listenForNewOrders = () => {
-    amqp.connect('amqp://localhost', (error, connection) => {
+    amqp.connect('amqp://rabbitmq', (error, connection) => {
+
         if (error) {
             throw error;
         }

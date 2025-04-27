@@ -1,0 +1,20 @@
+# Choose your base image (Node.js example)
+FROM node:20
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files first
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Then copy rest of the project files
+COPY . .
+
+# Start service
+CMD ["npm", "start"]
+
+# Expose port (your service's internal port)
+EXPOSE 3005

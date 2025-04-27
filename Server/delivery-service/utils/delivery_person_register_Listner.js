@@ -1,9 +1,9 @@
 const amqp = require('amqplib/callback_api');
-const DeliveryPerson = require('../models/deliveryPerson');  // DeliveryPerson model for saving the details
+const DeliveryPerson = require('../models/deliveryPerson');
 
 // Function to listen for delivery person registration events
 const listenForDeliveryPersonRegistration = () => {
-  amqp.connect('amqp://localhost', (error, connection) => {
+  amqp.connect('amqp://rabbitmq', (error, connection) => {  
     if (error) {
       throw error;
     }
@@ -13,27 +13,23 @@ const listenForDeliveryPersonRegistration = () => {
         throw error;
       }
 
-      const queue = 'delivery_person_registered_queue';  // Queue name for listening
+      const queue = 'delivery_person_registered_queue';
 
       channel.assertQueue(queue, { durable: true });
       console.log('Waiting for delivery person registration events...');
 
-      // Consume the message from the queue
       channel.consume(queue, async (msg) => {
         if (msg !== null) {
           const deliveryPersonData = JSON.parse(msg.content.toString());
           console.log(`Received delivery person event: ${deliveryPersonData.name}`);
-
-          // Save the delivery person details in the DeliveryPerson model
           await saveDeliveryPerson(deliveryPersonData);
-
-          // Acknowledge the message after processing
           channel.ack(msg);
         }
       });
     });
   });
 };
+
 
 // Function to save the delivery person in the DeliveryPerson model
 const saveDeliveryPerson = async (data) => {
