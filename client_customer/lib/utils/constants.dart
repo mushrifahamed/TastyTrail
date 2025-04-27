@@ -1,7 +1,10 @@
 class ApiConstants {
   static const String baseUrl = 'http://10.0.2.2:3001/api';
-  static const String userBaseUrl = 'http://10.0.2.21:3000/api/users';
-  static const String restaurantBaseUrl = 'http://10.0.2.2:3001/api/restaurants';
+
+  static const String userBaseUrl = 'http://10.0.2.2:3000/api/users';
+  static const String restaurantBaseUrl =
+      'http://10.0.2.2:3001/api/restaurants';
+
   static const String cartBaseUrl = 'http://10.0.2.2:3001/api/cart';
 }
 class AppConstants {

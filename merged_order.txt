@@ -60,6 +60,36 @@ const paymentService = require("../services/paymentService");
 const estimationService = require("../services/estimationService");
 const orderSplitter = require("../services/orderSplitter");
 const Order = require("../models/Order");
+const amqp = require("amqplib/callback_api");
+
+// Function to publish the order created event to RabbitMQ
+const publishOrderCreatedEvent = (orderId) => {
+  amqp.connect("amqp://localhost", (error, connection) => {
+    if (error) {
+      console.error("RabbitMQ connection error:", error);
+      return;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        console.error("RabbitMQ channel error:", error);
+        return;
+      }
+
+      const queue = "order_created_queue";
+      const msg = JSON.stringify({ orderId });
+
+      channel.assertQueue(queue, { durable: true });
+      channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
+
+      console.log(`Order Created Event Sent: ${msg}`);
+    });
+
+    setTimeout(() => {
+      connection.close();
+    }, 500);
+  });
+};
 
 // Get cart contents
 const getCart = async (req, res, next) => {
@@ -326,6 +356,118 @@ const checkoutCart = async (req, res, next) => {
   }
 };
 
+// Checkout items from a specific restaurant only - NEW FUNCTION
+const checkoutRestaurant = async (req, res, next) => {
+  try {
+    const customerId = req.user.id;
+    const { restaurantId, deliveryAddress } = req.body;
+    const token = req.headers.authorization?.split(" ")[1];
+
+    // Use default delivery location if not provided
+    const deliveryLocation = req.body.deliveryLocation || { lat: 0, lng: 0 };
+
+    const cart = await Cart.findOne({ customerId });
+    if (!cart || cart.items.length === 0) {
+      return res.status(400).json({ message: "Cart is empty" });
+    }
+
+    // Filter for items only from the specified restaurant
+    const restaurantItems = cart.items.filter(
+      (item) => item.restaurantId.toString() === restaurantId.toString()
+    );
+
+    if (restaurantItems.length === 0) {
+      return res.status(400).json({
+        message: "No items found for this restaurant in your cart",
+      });
+    }
+
+    // Get customer info from user service
+    let customerInfo;
+    try {
+      customerInfo = await userService.getUserInfo(customerId, token);
+    } catch (error) {
+      console.error("Failed to get user info, using fallback data:", error);
+      customerInfo = {
+        name: "Customer",
+        phone: "Unknown",
+      };
+    }
+
+    // Calculate total amount for this restaurant's items
+    const totalAmount = orderSplitter.calculateOrderTotal(restaurantItems);
+
+    // Calculate estimated delivery time
+    const estimatedTime = await estimationService.calculateEstimatedTime(
+      restaurantItems,
+      deliveryLocation,
+      [restaurantId]
+    );
+
+    // Create order for this restaurant
+    const order = new Order({
+      customerId,
+      customerInfo: {
+        name: customerInfo.name || "Customer",
+        phone: customerInfo.phone || "Unknown",
+      },
+      items: restaurantItems,
+      deliveryAddress,
+      deliveryLocation,
+      totalAmount,
+      paymentStatus: "pending",
+      estimatedDeliveryTime: estimatedTime,
+      trackingStatus: "placed",
+      statusUpdates: [
+        {
+          status: "placed",
+          timestamp: Date.now(),
+          note: "Order placed successfully",
+        },
+      ],
+      restaurantId,
+    });
+
+    // Save the order
+    const savedOrder = await order.save();
+
+    // Initiate payment process for this order
+    const paymentResponse = await paymentService.createPayment(
+      savedOrder._id,
+      totalAmount,
+      customerId,
+      `Order #${savedOrder._id} for restaurant ${restaurantId}`,
+      token
+    );
+
+    // Update order with payment ID
+    savedOrder.paymentId = paymentResponse.paymentId;
+    await savedOrder.save();
+
+    // Publish the order created event to RabbitMQ
+    publishOrderCreatedEvent(savedOrder._id);
+
+    // IMPORTANT FIX: Remove ONLY the items from this restaurant
+    cart.items = cart.items.filter(
+      (item) => item.restaurantId.toString() !== restaurantId.toString()
+    );
+    await cart.save();
+
+    res.status(201).json({
+      message: "Order created successfully",
+      order: savedOrder,
+      payment: {
+        paymentId: paymentResponse.paymentId,
+        checkoutUrl: paymentResponse.checkoutUrl,
+        paymentParams: paymentResponse.paymentParams,
+      },
+      cart: cart, // Return the updated cart with remaining items
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getCart,
   addToCart,
@@ -333,6 +475,7 @@ module.exports = {
   removeFromCart,
   clearCart,
   checkoutCart,
+  checkoutRestaurant, // Export the new function
 };
 
 
@@ -347,6 +490,35 @@ const notificationService = require("../services/notificationService");
 const estimationService = require("../services/estimationService");
 const userService = require("../services/userService");
 const { RESTAURANT_SERVICE_URL } = process.env;
+const amqp = require("amqplib/callback_api");
+
+// Function to publish an event to RabbitMQ
+// Function to publish the order created event to RabbitMQ
+const publishOrderCreatedEvent = (orderId) => {
+  amqp.connect("amqp://localhost", (error, connection) => {
+    if (error) {
+      throw error;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        throw error;
+      }
+
+      const queue = "order_created_queue"; // Queue name where delivery service listens
+      const msg = JSON.stringify({ orderId }); // Message payload (only orderId)
+
+      channel.assertQueue(queue, { durable: true });
+      channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
+
+      console.log(`Order Created Event Sent: ${msg}`);
+    });
+
+    setTimeout(() => {
+      connection.close();
+    }, 500);
+  });
+};
 
 // Create a new order with items from a single restaurant
 const createOrder = async (req, res, next) => {
@@ -455,6 +627,9 @@ const createOrder = async (req, res, next) => {
       savedOrder.paymentId = paymentResponse.paymentId;
       await savedOrder.save();
     }
+
+    // Publish the order created event to RabbitMQ after the order is created
+    publishOrderCreatedEvent(savedOrder._id);
 
     res.status(201).json(savedOrder);
   } catch (error) {
@@ -658,6 +833,61 @@ const updateOrderPaymentStatus = async (req, res, next) => {
   }
 };
 
+const updateSubOrderStatus = async (req, res, next) => {
+  try {
+    const { subOrderId } = req.params;
+    const { status, note } = req.body;
+
+    // Find the order containing this sub-order
+    const order = await Order.findOne({ "items._id": subOrderId });
+
+    if (!order) {
+      return res.status(404).json({ message: "Sub-order not found" });
+    }
+
+    // Find the specific item in the order
+    const subOrderIndex = order.items.findIndex(
+      (item) => item._id.toString() === subOrderId
+    );
+
+    if (subOrderIndex === -1) {
+      return res.status(404).json({ message: "Sub-order not found in order" });
+    }
+
+    // Update the status of the sub-order
+    order.items[subOrderIndex].status = status;
+
+    // Add to status updates history if note is provided
+    if (note) {
+      order.statusUpdates.push({
+        status: `sub_order_${status}`,
+        timestamp: Date.now(),
+        note: note,
+        subOrderId: subOrderId,
+      });
+    }
+
+    await order.save();
+
+    // Notify customer about status update
+    await notificationService
+      .sendNotification(
+        order.customerId,
+        "sub_order_status_update",
+        `Your item "${order.items[subOrderIndex].name}" is now ${status}`,
+        { orderId: order._id, subOrderId: subOrderId, status }
+      )
+      .catch((err) => console.error("Notification service error:", err));
+
+    res.status(200).json({
+      message: "Sub-order status updated successfully",
+      order,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Export all controller functions
 module.exports = {
   createOrder,
@@ -668,6 +898,7 @@ module.exports = {
   getDeliveryPersonOrders,
   getDeliveryOrder,
   updateOrderPaymentStatus,
+  updateSubOrderStatus,
 };
 
 
@@ -803,6 +1034,12 @@ const orderSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
+  paymentType: {
+    type: String,
+    enum: ["cash", "card"],
+    required: true,
+    default: "cash",
+  },
   paymentStatus: {
     type: String,
     enum: ["pending", "completed", "failed", "refunded"],
@@ -868,6 +1105,7 @@ const {
   removeFromCart,
   clearCart,
   checkoutCart,
+  checkoutRestaurant,
 } = require("../controllers/cartController");
 const authMiddleware = require("../utils/authMiddleware");
 
@@ -880,7 +1118,7 @@ router.post("/items", addToCart);
 router.patch("/items", updateCartItem);
 router.delete("/items/:itemId", removeFromCart);
 router.delete("/", clearCart);
-router.post("/checkout", checkoutCart);
+router.post("/checkout", checkoutRestaurant);
 
 module.exports = router;
 
@@ -967,6 +1205,11 @@ const { RESTAURANT_SERVICE_URL } = process.env;
 
 module.exports = {
   calculateEstimatedTime: async (items, deliveryLocation, restaurantIds) => {
+    if (!items || !Array.isArray(items)) {
+      console.log("Warning: items is undefined or not an array");
+      return { estimatedTime: 30 }; // Default value
+    }
+
     // 1. Calculate preparation time (10 mins per item)
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
     const preparationTime = totalItems * 10; // in minutes

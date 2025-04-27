@@ -85,9 +85,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Text(
                       "Flavor Town, Gastronomia",
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
                   ),
                   IconButton(
@@ -100,9 +100,9 @@ class _HomeScreenState extends State<HomeScreen> {
               Text(
                 "Discover the best restaurants near you!",
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w400,
-                ),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w400,
+                    ),
               ),
             ],
           ),
@@ -154,14 +154,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     return _RestaurantCard(
                       restaurant: restaurant,
                       onTap: () {
-                        Navigator.push(
+                        Navigator.pushNamed(
                           context,
-                          MaterialPageRoute(
-                            builder:
-                                (_) => RestaurantDetailScreen(
-                                  restaurant: restaurant,
-                                ),
-                          ),
+                          '/restaurant',
+                          arguments: restaurant.id,
                         );
                       },
                     );
@@ -201,12 +197,11 @@ class _RestaurantCard extends StatelessWidget {
                 width: double.infinity,
                 height: 170.h,
                 fit: BoxFit.cover,
-                errorBuilder:
-                    (_, __, ___) => Container(
-                      height: 170.h,
-                      color: Colors.grey[200],
-                      child: const Icon(Icons.restaurant, size: 40),
-                    ),
+                errorBuilder: (_, __, ___) => Container(
+                  height: 170.h,
+                  color: Colors.grey[200],
+                  child: const Icon(Icons.restaurant, size: 40),
+                ),
               ),
             ),
             // Details tile, full width, curved bottom
@@ -233,9 +228,9 @@ class _RestaurantCard extends StatelessWidget {
                   Text(
                     restaurant.name,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
                   ),
                   SizedBox(height: 6.h),
                   Text(

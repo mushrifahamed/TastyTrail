@@ -138,10 +138,10 @@ class CartProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final result = await _cartService.checkout(
-        deliveryAddress,
-        deliveryLocation,
-      );
+      final result = await _cartService.checkout({
+        'address': deliveryAddress,
+        'location': deliveryLocation,
+      });
       if (result['success']) {
         _cart = Cart.fromJson({
           'customerId': _cart?.customerId ?? '',
@@ -158,6 +158,67 @@ class CartProvider with ChangeNotifier {
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  Map<String, List<CartItem>> get itemsByRestaurant {
+    if (_cart == null) return {};
+
+    Map<String, List<CartItem>> grouped = {};
+
+    for (var item in _cart!.items) {
+      if (!grouped.containsKey(item.restaurantId)) {
+        grouped[item.restaurantId] = [];
+      }
+      grouped[item.restaurantId]!.add(item);
+    }
+
+    return grouped;
+  }
+
+// Calculate total amount for a specific restaurant
+  double getTotalAmountForRestaurant(String restaurantId) {
+    if (_cart == null) return 0.0;
+
+    return _cart!.items
+        .where((item) => item.restaurantId == restaurantId)
+        .fold(0.0, (sum, item) => sum + (item.price * item.quantity));
+  }
+
+// Checkout items from a specific restaurant
+  Future<void> checkoutRestaurant(
+    String restaurantId,
+    String deliveryAddress,
+    String paymentMethod,
+    List<double>? coordinates,
+  ) async {
+    try {
+      _isLoading = true;
+      notifyListeners();
+
+      // Filter items for this restaurant
+      List<CartItem> restaurantItems = _cart!.items
+          .where((item) => item.restaurantId == restaurantId)
+          .toList();
+
+      if (restaurantItems.isEmpty) {
+        throw Exception('No items for this restaurant');
+      }
+
+      // Call checkout API with payment method
+      await _cartService.checkoutRestaurant(
+          restaurantId, deliveryAddress, paymentMethod, coordinates);
+
+      // Refresh cart after checkout
+      await fetchCart();
+
+      _isLoading = false;
+      notifyListeners();
+    } catch (error) {
+      _isLoading = false;
+      _error = error.toString();
+      notifyListeners();
+      throw error;
     }
   }
 }
