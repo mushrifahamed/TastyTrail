@@ -7,7 +7,8 @@ require("dotenv").config();
 // Create a new payment
 const createPayment = async (req, res, next) => {
   try {
-    const { orderId, amount, customerId, description } = req.body;
+    const { orderId, amount, customerId, description, paymentMethod } =
+      req.body;
 
     // Validate required fields
     if (!orderId || !amount || !customerId) {
@@ -74,6 +75,7 @@ const createPayment = async (req, res, next) => {
       amount,
       currency: req.body.currency || "LKR",
       description: descriptionStr,
+      paymentMethod: paymentMethod,
     });
 
     const savedPayment = await payment.save();
@@ -85,7 +87,8 @@ const createPayment = async (req, res, next) => {
       payment.currency,
       `Order #${orderId}`, // Simple description instead of items array
       customerId,
-      customerInfo
+      customerInfo,
+      paymentMethod
     );
 
     // Generate payment URL

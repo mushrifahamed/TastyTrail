@@ -10,25 +10,25 @@ const { JWT_SECRET, JWT_EXPIRES_IN } = process.env;
 const verifyToken = async (req, res, next) => {
   try {
     // Get token from header
-    const token = req.headers.authorization?.split(' ')[1];
-    
+    const token = req.headers.authorization?.split(" ")[1];
+
     if (!token) {
-      return res.status(401).json({ message: 'No token provided' });
+      return res.status(401).json({ message: "No token provided" });
     }
 
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
     // Get user from database
-    const user = await User.findById(decoded.id).select('-password');
-    
+    const user = await User.findById(decoded.id).select("-password");
+
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: "User not found" });
     }
 
     // Return user information
-    res.status(200).json({ 
-      status: 'success',
+    res.status(200).json({
+      status: "success",
       data: {
         id: user._id,
         name: user.name,
@@ -37,14 +37,14 @@ const verifyToken = async (req, res, next) => {
         role: user.role,
         isActive: user.isActive,
         // Include any other relevant user info
-      }
+      },
     });
   } catch (error) {
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ message: 'Invalid token' });
+    if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({ message: "Invalid token" });
     }
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ message: 'Token expired' });
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({ message: "Token expired" });
     }
     next(error);
   }
@@ -147,23 +147,22 @@ const createRestaurantAdmin = async (req, res, next) => {
 const getAdminsByRestaurant = async (req, res, next) => {
   try {
     const { restaurantId } = req.params;
-    
-    const admins = await User.find({ 
-      role: 'restaurant_admin',
-      restaurantId: new mongoose.Types.ObjectId(restaurantId)
-    }).select('-password');
-    
+
+    const admins = await User.find({
+      role: "restaurant_admin",
+      restaurantId: new mongoose.Types.ObjectId(restaurantId),
+    }).select("-password");
+
     res.status(200).json({
       status: "success",
       data: {
-        admins
-      }
+        admins,
+      },
     });
   } catch (error) {
     next(error);
   }
 };
-
 
 // const requestRestaurantAdminAccess = async (req, res, next) => {
 //   try {
@@ -573,7 +572,6 @@ const deleteUser = async (req, res, next) => {
 };
 
 module.exports = {
-
   verifyToken,
   // Admin methods
   createAdmin,

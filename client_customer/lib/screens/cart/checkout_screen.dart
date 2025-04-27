@@ -1,7 +1,11 @@
 // In screens/cart/checkout_screen.dart
 
+import 'package:client_customer/screens/location_picker_screen.dart';
 import 'package:client_customer/theme/app_theme.dart';
 import 'package:flutter/material.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../../providers/cart_provider.dart';
 
@@ -13,17 +17,18 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
+  bool _isGettingLocation = false;
+  LatLng? _selectedLocation;
   final TextEditingController _addressController = TextEditingController();
-  final TextEditingController _noteController = TextEditingController();
   String _selectedRestaurantId = '';
   String _selectedRestaurantName = '';
   String _selectedPaymentMethod = 'Cash on Delivery';
   bool _isProcessing = false;
 
+  // Updated to only include Cash and Card
   final List<String> _paymentMethods = [
     'Cash on Delivery',
     'Credit Card',
-    'PayPal',
   ];
 
   @override
@@ -39,8 +44,74 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   @override
   void dispose() {
     _addressController.dispose();
-    _noteController.dispose();
     super.dispose();
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isGettingLocation = true;
+    });
+
+    try {
+      // Check location permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permissions are denied');
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permissions are permanently denied');
+      }
+
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition();
+      _selectedLocation = LatLng(position.latitude, position.longitude);
+
+      // Get address from coordinates
+      List<Placemark> placemarks =
+          await placemarkFromCoordinates(position.latitude, position.longitude);
+
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks[0];
+        _addressController.text =
+            '${place.street}, ${place.subLocality}, ${place.locality}, ${place.postalCode}';
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: ${e.toString()}')),
+      );
+    } finally {
+      setState(() {
+        _isGettingLocation = false;
+      });
+    }
+  }
+
+  Future<void> _openLocationPicker() async {
+    final LatLng? result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LocationPickerScreen(
+          initialLocation: _selectedLocation,
+        ),
+      ),
+    );
+
+    if (result != null) {
+      _selectedLocation = result;
+      // Get address from coordinates
+      List<Placemark> placemarks =
+          await placemarkFromCoordinates(result.latitude, result.longitude);
+
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks[0];
+        _addressController.text =
+            '${place.street}, ${place.subLocality}, ${place.locality}, ${place.postalCode}';
+      }
+    }
   }
 
   @override
@@ -127,56 +198,66 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     const SizedBox(height: 20),
 
                     // Delivery Address
-                    const Text(
-                      'Delivery Address',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _addressController,
-                      decoration: InputDecoration(
-                        hintText: 'Enter your delivery address',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: Colors.grey[300]!),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Delivery Address',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                        prefixIcon: const Icon(Icons.location_on),
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.my_location),
-                          onPressed: () {
-                            // Get current location
-                            _addressController.text = "Current Location";
-                          },
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _addressController,
+                          decoration: InputDecoration(
+                            hintText: 'Enter your delivery address',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: Colors.grey[300]!),
+                            ),
+                            prefixIcon: const Icon(Icons.location_on),
+                          ),
+                          maxLines: 2,
                         ),
-                      ),
-                      maxLines: 2,
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    // Additional Note
-                    const Text(
-                      'Additional Note',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _noteController,
-                      decoration: InputDecoration(
-                        hintText: 'Special instructions for delivery',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: _isGettingLocation
+                                    ? null
+                                    : _getCurrentLocation,
+                                icon: const Icon(Icons.my_location),
+                                label: _isGettingLocation
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2))
+                                    : const Text('Use Current Location'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.grey[200],
+                                  foregroundColor: Colors.black87,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () => _openLocationPicker(),
+                                icon: const Icon(Icons.map),
+                                label: const Text('Select on Map'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.grey[200],
+                                  foregroundColor: Colors.black87,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        prefixIcon: const Icon(Icons.note),
-                      ),
-                      maxLines: 2,
+                      ],
                     ),
 
                     const SizedBox(height: 20),
@@ -383,14 +464,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       return;
     }
 
+    if (_selectedLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Please select a delivery location on map')),
+      );
+      return;
+    }
+
     setState(() {
       _isProcessing = true;
     });
 
     try {
+      // Pass both address and payment method to the backend
       await cartProvider.checkoutRestaurant(
         _selectedRestaurantId,
         _addressController.text.trim(),
+        _selectedPaymentMethod,
+        [_selectedLocation!.longitude, _selectedLocation!.latitude],
       );
 
       if (!mounted) return;

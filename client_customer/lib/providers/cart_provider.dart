@@ -187,7 +187,11 @@ class CartProvider with ChangeNotifier {
 
 // Checkout items from a specific restaurant
   Future<void> checkoutRestaurant(
-      String restaurantId, String deliveryAddress) async {
+    String restaurantId,
+    String deliveryAddress,
+    String paymentMethod,
+    List<double>? coordinates,
+  ) async {
     try {
       _isLoading = true;
       notifyListeners();
@@ -201,8 +205,9 @@ class CartProvider with ChangeNotifier {
         throw Exception('No items for this restaurant');
       }
 
-      // Call checkout API
-      await _cartService.checkoutRestaurant(restaurantId, deliveryAddress);
+      // Call checkout API with payment method
+      await _cartService.checkoutRestaurant(
+          restaurantId, deliveryAddress, paymentMethod, coordinates);
 
       // Refresh cart after checkout
       await fetchCart();

@@ -274,27 +274,34 @@ class CartService {
     }
   }
 
-  Future<void> checkoutRestaurant(
-      String restaurantId, String deliveryAddress) async {
-    final token = await _authService.getToken();
-
-    final response = await http.post(
-      Uri.parse('$baseUrl/checkout'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-      body: json.encode({
-        'deliveryAddress': deliveryAddress,
-        'deliveryLocation': {
-          'coordinates': [0, 0], // Replace with actual coordinates if available
+  Future<Map<String, dynamic>> checkoutRestaurant(
+      String restaurantId,
+      String deliveryAddress,
+      String paymentMethod,
+      List<double>? coordinates) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/checkout'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${await _authService.getToken()}',
         },
-        'restaurantId': restaurantId, // Send restaurantId to filter items
-      }),
-    );
+        body: jsonEncode({
+          'restaurantId': restaurantId,
+          'deliveryAddress': deliveryAddress,
+          'paymentMethod': paymentMethod,
+          'deliveryLocation': {
+            'type': 'Point',
+            'coordinates': coordinates ?? [0, 0], // Format for GeoJSON
+          },
+        }),
+      );
 
-    if (response.statusCode != 201) {
-      throw Exception('Failed to checkout: ${response.body}');
+      // Process response...
+      return json.decode(response.body);
+    } catch (e) {
+      // Handle exceptions...
+      throw Exception('Failed to checkout: $e');
     }
   }
 }

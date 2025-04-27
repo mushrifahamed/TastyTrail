@@ -193,6 +193,8 @@ const checkoutCart = async (req, res, next) => {
     const { deliveryAddress, deliveryLocation } = req.body;
     const token = req.headers.authorization?.split(" ")[1];
 
+    console.log("checkoutCart", req.body);
+
     const cart = await Cart.findOne({ customerId });
     if (!cart || cart.items.length === 0) {
       return res.status(400).json({ message: "Cart is empty" });
@@ -226,6 +228,8 @@ const checkoutCart = async (req, res, next) => {
 
         // Calculate total amount for this restaurant's items
         const totalAmount = orderSplitter.calculateOrderTotal(restaurantItems);
+
+        console.log("rest items", restaurantItems);
 
         // Calculate estimated delivery time
         const estimatedTime = await estimationService.calculateEstimatedTime(
@@ -308,6 +312,17 @@ const checkoutRestaurant = async (req, res, next) => {
     const { restaurantId, deliveryAddress } = req.body;
     const token = req.headers.authorization?.split(" ")[1];
 
+    if (!req.body.deliveryLocation || !req.body.deliveryLocation.coordinates) {
+      return res.status(400).json({
+        message: "Delivery location coordinates are required",
+      });
+    }
+
+    if (!deliveryAddress) {
+      console.log("Delivery address is required");
+      return res.status(400).json({ message: "Delivery address is required" });
+    }
+
     // Use default delivery location if not provided
     const deliveryLocation = req.body.deliveryLocation || { lat: 0, lng: 0 };
 
@@ -342,12 +357,18 @@ const checkoutRestaurant = async (req, res, next) => {
     // Calculate total amount for this restaurant's items
     const totalAmount = orderSplitter.calculateOrderTotal(restaurantItems);
 
+    console.log("rest items", restaurantItems);
+
+    console.log("Delivery location:", deliveryLocation);
+
     // Calculate estimated delivery time
     const estimatedTime = await estimationService.calculateEstimatedTime(
       restaurantItems,
       deliveryLocation,
-      [restaurantId]
+      restaurantId
     );
+
+    console.log("estimated time", estimatedTime);
 
     // Create order for this restaurant
     const order = new Order({

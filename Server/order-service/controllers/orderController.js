@@ -49,6 +49,10 @@ const createOrder = async (req, res, next) => {
       deliveryLocation,
     } = req.body;
 
+    if (!deliveryAddress) {
+      return res.status(400).json({ message: "Delivery address is required" });
+    }
+
     // Ensure all items are from the same restaurant
     const restaurantIds = [
       ...new Set(items.map((item) => item.restaurantId.toString())),
@@ -75,11 +79,13 @@ const createOrder = async (req, res, next) => {
     // Calculate total amount
     const totalAmount = orderSplitter.calculateOrderTotal(items);
 
+    console.log("Delivery location:", deliveryLocation);
+
     // Calculate estimated delivery time
     const estimatedTime = await estimationService.calculateEstimatedTime(
       items,
       deliveryLocation,
-      [restaurantId]
+      restaurantId
     );
 
     // Create the order
