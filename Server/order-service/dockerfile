@@ -14,7 +14,10 @@ RUN npm install
 COPY . .
 
 # Start service
-CMD ["npm", "start"]
+# CMD ["npm", "start"]
+RUN npm install -g nodemon
+CMD ["nodemon", "server.js"]
+
 
 # Expose port (your service's internal port)
 EXPOSE 3002
