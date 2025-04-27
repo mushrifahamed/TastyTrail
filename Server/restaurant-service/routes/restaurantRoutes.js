@@ -24,6 +24,11 @@ router.post('/',
 // Get nearby restaurants
 router.get("/nearby", restaurantController.getNearbyRestaurants);
 
+// Add this near the top with other routes
+router.get('/verify/:restaurantId', 
+    restaurantController.verifyRestaurant
+  );
+
 // get by id
 router.get("/:id", restaurantController.getRestaurantById);
 

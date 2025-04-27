@@ -1,4 +1,5 @@
 const axios = require("axios");
+const mongoose = require('mongoose');
 const Restaurant = require("../models/restaurantModel");
 const { calculateDistance } = require("../utils/geolocation");
 const upload = require("../config/multerConfig");
@@ -238,14 +239,78 @@ const getRestaurantAvailability = async (req, res) => {
 
 // Get restaurant by ID
 const getRestaurantById = async (req, res) => {
+  const { id } = req.params;
+
+  // 1. Validate ObjectId
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ 
+      status: "fail",
+      message: "Invalid restaurant ID format" 
+    });
+  }
+
   try {
-    const restaurant = await Restaurant.findById(req.params.id);
+    // 2. Fetch restaurant
+    const restaurant = await Restaurant.findById(id);
     if (!restaurant) {
-      return res.status(404).json({ message: "Restaurant not found" });
+      return res.status(404).json({ 
+        status: "fail",
+        message: "Restaurant not found" 
+      });
     }
-    res.status(200).json(restaurant);
+
+    // 3. Success response
+    res.status(200).json({ 
+      status: "success", 
+      data: restaurant 
+    });
+
   } catch (err) {
-    res.status(500).json({ message: "Error fetching restaurant", err });
+    // 4. Log and handle errors
+    console.error("Error in getRestaurantById:", err);
+    res.status(500).json({ 
+      status: "error",
+      message: "Server error fetching restaurant" 
+    });
+  }
+};
+
+// Verify Restaurant Existence
+const verifyRestaurant = async (req, res) => {
+  const { restaurantId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+    return res.status(400).json({ 
+      status: 'fail',
+      message: 'Invalid restaurant ID format' 
+    });
+  }
+
+  try {
+    const restaurant = await Restaurant.findById(restaurantId);
+    if (!restaurant) {
+      return res.status(404).json({ 
+        status: 'fail',
+        message: 'Restaurant not found' 
+      });
+    }
+
+    res.status(200).json({ 
+      status: 'success',
+      data: {
+        exists: true,
+        restaurant: {
+          id: restaurant._id,
+          name: restaurant.name
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Error verifying restaurant:', err);
+    res.status(500).json({ 
+      status: 'error',
+      message: 'Error verifying restaurant' 
+    });
   }
 };
 
@@ -336,6 +401,7 @@ module.exports = {
   toggleAvailability,
   getRestaurantAvailability,
   getRestaurantById,
+  verifyRestaurant,
   getAllRestaurants,
   manageMenu,
   searchRestaurants,
