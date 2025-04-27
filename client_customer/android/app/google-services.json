@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "252968235942",
+    "project_id": "tastytrail-c628e",
+    "storage_bucket": "tastytrail-c628e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:252968235942:android:5021da9f8ec90afe725567",
+        "android_client_info": {
+          "package_name": "com.example.client_customer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCq8bu74L1I8HXcpZLsn-RYzpSXn8Gk1vU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
