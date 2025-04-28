@@ -79,94 +79,214 @@ module.exports = connectDB;
 const multer = require('multer');
 const path = require('path');
 
-// Set up storage for images (in the 'uploads' directory)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/');  // Directory to store uploaded images
+    cb(null, 'uploads/');
   },
   filename: (req, file, cb) => {
-    const { name, menuItemNames } = req.body;
-
-    // If it's a cover image
-    if (file.fieldname === 'coverImage') {
-      cb(null, `${name.replace(/\s+/g, '_').toLowerCase()}_cover_image_${Date.now()}${path.extname(file.originalname)}`);
-    }
-    // If it's a menu item image (for each menu item)
-    else if (file.fieldname === 'menuItemImages') {
-      const itemName = menuItemNames.split(',')[req.index];  // Assuming menuItemNames are passed in order
-      cb(null, `${itemName.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}${path.extname(file.originalname)}`);
-    } else {
+    const { name, menu } = req.body;
+    
+    try {
+      // Parse menu if it's a string (from form-data)
+      const parsedMenu = typeof menu === 'string' ? JSON.parse(menu) : (menu || []);
+      
+      if (file.fieldname === 'coverImage') {
+        // Handle cover image filename
+        const cleanName = name ? name.replace(/\s+/g, '_').toLowerCase() : 'restaurant';
+        cb(null, `${cleanName}_cover_${Date.now()}${path.extname(file.originalname)}`);
+      } 
+      else if (file.fieldname === 'menuItemImages') {
+        // Handle menu item images
+        const index = req.files['menuItemImages']?.indexOf(file) || 0;
+        const itemName = parsedMenu[index]?.name || `item_${index}`;
+        cb(null, `${itemName.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}${path.extname(file.originalname)}`);
+      } 
+      else {
+        // Default filename
+        cb(null, `${Date.now()}${path.extname(file.originalname)}`);
+      }
+    } catch (err) {
+      console.error('Error generating filename:', err);
       cb(null, `${Date.now()}${path.extname(file.originalname)}`);
     }
-  },
+  }
 });
 
-// File filter to accept only images (jpg, jpeg, png)
 const fileFilter = (req, file, cb) => {
   const filetypes = /jpeg|jpg|png/;
   const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = filetypes.test(file.mimetype);
 
   if (extname && mimetype) {
-    return cb(null, true); // Accept file
+    cb(null, true);
   } else {
     cb(new Error('Invalid file type. Only jpg, jpeg, and png are allowed.'));
   }
 };
 
-const upload = multer({ storage, fileFilter });
+const upload = multer({ 
+  storage, 
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 
 module.exports = upload;
 
-
 /* File: ./server/restaurant-service\controllers\restaurantController.js */
+const axios = require("axios");
+const mongoose = require('mongoose');
 const Restaurant = require("../models/restaurantModel");
 const { calculateDistance } = require("../utils/geolocation");
 const upload = require("../config/multerConfig");
 
-// Add new restaurant with cover image and multiple menu item images
 const addRestaurant = async (req, res) => {
-  const { name, description, address, menu, operatingHours, menuItemNames } =
-    req.body;
-
-  // Handle file upload for the cover image
-  const coverImage = req.file ? req.file.path : null; // Store the cover image file path
-
-  // Handle file upload for menu item images (multiple files)
-  const menuItemImages = req.files; // Multer will upload multiple files as an array in `req.files`
+  console.log('Request body:', req.body); // Debugging log
+  console.log('Request files:', req.files); // Debugging log
 
   try {
-    // Check if restaurant already exists
-    const existingRestaurant = await Restaurant.findOne({ name });
-    if (existingRestaurant) {
-      return res.status(400).json({ message: "Restaurant already exists" });
+    // Parse the incoming data (handling both stringified and direct objects)
+    const name = req.body.name;
+    const description = req.body.description;
+    
+    const address = typeof req.body.address === 'string' 
+      ? JSON.parse(req.body.address) 
+      : req.body.address;
+    
+    const operatingHours = typeof req.body.operatingHours === 'string'
+      ? JSON.parse(req.body.operatingHours)
+      : req.body.operatingHours;
+    
+    let menu = [];
+    try {
+      menu = typeof req.body.menu === 'string'
+        ? JSON.parse(req.body.menu)
+        : req.body.menu || [];
+      
+      if (!Array.isArray(menu)) {
+        throw new Error('Menu must be an array');
+      }
+    } catch (err) {
+      console.error("Error parsing menu:", err);
+      return res.status(400).json({ message: "Invalid menu format" });
     }
 
-    // Create a new restaurant instance
-    const newRestaurant = new Restaurant({
-      name,
-      description,
-      address,
-      menu,
-      operatingHours,
-      availability: true, // Default availability is true
-      coverImage, // Save the cover image URL/path
-    });
-
-    // For each menu item, associate the uploaded image
-    if (menuItemImages) {
-      menu.forEach((menuItem, index) => {
-        if (menuItemImages[index]) {
-          menuItem.image = menuItemImages[index].path; // Assign image path to each menu item
+    // Validate required fields
+    if (!name || !address) {
+      return res.status(400).json({ 
+        message: "Name and address are required",
+        details: {
+          received: { name, address }
         }
       });
     }
 
-    // Save the new restaurant
+    // Validate address structure
+    if (!address.geoCoordinates || 
+        typeof address.geoCoordinates !== 'object' ||
+        isNaN(parseFloat(address.geoCoordinates.longitude)) || 
+        isNaN(parseFloat(address.geoCoordinates.latitude))) {
+      return res.status(400).json({ 
+        message: "Valid geo coordinates are required",
+        details: {
+          receivedCoordinates: address.geoCoordinates
+        }
+      });
+    }
+
+    // Check if restaurant already exists
+    const existingRestaurant = await Restaurant.findOne({ name });
+    if (existingRestaurant) {
+      return res.status(400).json({ 
+        message: "Restaurant already exists",
+        existingId: existingRestaurant._id
+      });
+    }
+
+    // Handle file uploads
+    const coverImage = req.files?.coverImage?.[0]?.path || null;
+    const menuItemImages = req.files?.menuItemImages || [];
+
+    // Validate menu items match uploaded images
+    if (menuItemImages.length > 0 && menuItemImages.length !== menu.length) {
+      console.warn(`Mismatch: ${menuItemImages.length} images for ${menu.length} menu items`);
+    }
+
+    // Create new restaurant with proper data types
+    const newRestaurant = new Restaurant({
+      name: name.trim(),
+      description: description ? description.trim() : '',
+      address: {
+        street: address.street ? address.street.trim() : '',
+        city: address.city ? address.city.trim() : '',
+        country: address.country ? address.country.trim() : '',
+        geoCoordinates: {
+          type: "Point",
+          coordinates: [
+            parseFloat(address.geoCoordinates.longitude),
+            parseFloat(address.geoCoordinates.latitude)
+          ],
+        }
+      },
+      menu: menu.map((item, index) => ({
+        name: item.name ? item.name.trim() : `Item ${index + 1}`,
+        description: item.description ? item.description.trim() : '',
+        price: parseFloat(item.price) || 0,
+        category: item.category ? item.category.trim() : 'other',
+        image: menuItemImages[index]?.path || null
+      })),
+      operatingHours: {
+        from: operatingHours?.from || '09:00',
+        to: operatingHours?.to || '21:00'
+      },
+      availability: true,
+      coverImage,
+    });
+
+    // Validate the restaurant document before saving
+    const validationError = newRestaurant.validateSync();
+    if (validationError) {
+      return res.status(400).json({
+        message: "Validation failed",
+        error: validationError.message,
+        details: validationError.errors
+      });
+    }
+
     await newRestaurant.save();
-    res.status(201).json(newRestaurant);
+
+    res.status(201).json({
+      status: "success",
+      data: {
+        restaurant: newRestaurant,
+      },
+    });
   } catch (err) {
-    res.status(500).json({ message: "Error creating restaurant", err });
+    console.error("Error creating restaurant:", err);
+    
+    // Handle duplicate key errors separately
+    if (err.code === 11000) {
+      return res.status(400).json({ 
+        message: "Restaurant with this name already exists",
+        error: err.message
+      });
+    }
+    
+    // Handle validation errors
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({
+        message: "Validation failed",
+        error: err.message,
+        details: err.errors
+      });
+    }
+
+    res.status(500).json({ 
+      message: "Error creating restaurant",
+      error: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 };
 
@@ -213,10 +333,6 @@ const getNearbyRestaurants = async (req, res) => {
   }
 };
 
-module.exports = {
-  getNearbyRestaurants,
-};
-
 // Update restaurant availability
 const toggleAvailability = async (req, res) => {
   const { id } = req.params;
@@ -234,6 +350,126 @@ const toggleAvailability = async (req, res) => {
       .json({ message: "Restaurant availability updated", restaurant });
   } catch (err) {
     res.status(500).json({ message: "Error updating availability", err });
+  }
+};
+
+// Get restaurant availability status
+const getRestaurantAvailability = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const restaurant = await Restaurant.findById(id);
+
+    if (!restaurant) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    res.status(200).json({
+      restaurantId: restaurant._id,
+      isAvailable: restaurant.availability,
+    });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ message: "Error checking restaurant availability", err });
+  }
+};
+
+// Get restaurant by ID
+const getRestaurantById = async (req, res) => {
+  const { id } = req.params;
+
+  // 1. Validate ObjectId
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ 
+      status: "fail",
+      message: "Invalid restaurant ID format" 
+    });
+  }
+
+  try {
+    // 2. Fetch restaurant
+    const restaurant = await Restaurant.findById(id);
+    if (!restaurant) {
+      return res.status(404).json({ 
+        status: "fail",
+        message: "Restaurant not found" 
+      });
+    }
+
+    // 3. Success response
+    res.status(200).json({ 
+      status: "success", 
+      data: restaurant 
+    });
+
+  } catch (err) {
+    // 4. Log and handle errors
+    console.error("Error in getRestaurantById:", err);
+    res.status(500).json({ 
+      status: "error",
+      message: "Server error fetching restaurant" 
+    });
+  }
+};
+
+// Verify Restaurant Existence
+const verifyRestaurant = async (req, res) => {
+  const { restaurantId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+    return res.status(400).json({ 
+      status: 'fail',
+      message: 'Invalid restaurant ID format' 
+    });
+  }
+
+  try {
+    const restaurant = await Restaurant.findById(restaurantId);
+    if (!restaurant) {
+      return res.status(404).json({ 
+        status: 'fail',
+        message: 'Restaurant not found' 
+      });
+    }
+
+    res.status(200).json({ 
+      status: 'success',
+      data: {
+        exists: true,
+        restaurant: {
+          id: restaurant._id,
+          name: restaurant.name
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Error verifying restaurant:', err);
+    res.status(500).json({ 
+      status: 'error',
+      message: 'Error verifying restaurant' 
+    });
+  }
+};
+
+//get all restaurants
+const getAllRestaurants = async (req, res) => {
+  try {
+    // Fetch all restaurants from the database
+    const restaurants = await Restaurant.find(); // You can add query filters if needed
+    
+    if (restaurants.length === 0) {
+      return res.status(404).json({ message: "No restaurants found" });
+    }
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        restaurants, // Return the list of restaurants
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching restaurants:", err);
+    res.status(500).json({ message: "Error fetching restaurants", err });
   }
 };
 
@@ -296,73 +532,58 @@ const searchRestaurants = async (req, res) => {
   }
 };
 
-const getRestaurantAvailability = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const restaurant = await Restaurant.findById(id);
-
-    if (!restaurant) {
-      return res.status(404).json({ message: "Restaurant not found" });
-    }
-
-    res.status(200).json({
-      restaurantId: restaurant._id,
-      isAvailable: restaurant.availability,
-    });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ message: "Error checking restaurant availability", err });
-  }
-};
-
-const getRestaurantById = async (req, res) => {
-  try {
-    const restaurant = await Restaurant.findById(req.params.id);
-    if (!restaurant) {
-      return res.status(404).json({ message: "Restaurant not found" });
-    }
-    res.status(200).json(restaurant);
-  } catch (err) {
-    res.status(500).json({ message: "Error fetching restaurant", err });
-  }
-};
-
 module.exports = {
   addRestaurant,
   getNearbyRestaurants,
   toggleAvailability,
-  manageMenu,
-  searchRestaurants,
   getRestaurantAvailability,
   getRestaurantById,
+  verifyRestaurant,
+  getAllRestaurants,
+  manageMenu,
+  searchRestaurants,
+
+
 };
 
 
+
 /* File: ./server/restaurant-service\middleware\authMiddleware.js */
+// restaurant-service/middleware/authMiddleware.js
 const jwt = require('jsonwebtoken');
 
-// const verifyToken = (req, res, next) => {
-//   const token = req.header('Authorization');
-//   if (!token) return res.status(401).json({ message: 'No token, authorization denied' });
+const verifyToken = (roles = []) => {
+  return async (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ message: 'No token provided' });
+    }
 
-//   try {
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//     req.user = decoded;
-//     next();
-//   } catch (err) {
-//     res.status(400).json({ message: 'Invalid token' });
-//   }
-// };
+    try {
+      // Verify token directly (no API call needed)
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      
+      // Attach user info from token
+      req.user = {
+        id: decoded.id,
+        role: decoded.role
+      };
 
-// module.exports = verifyToken;
+      // Check if user has required role
+      if (roles.length && !roles.includes(decoded.role)) {
+        return res.status(403).json({ message: 'Insufficient permissions' });
+      }
 
-const verifyToken = (req, res, next) => {
-    // Bypass authentication for testing
-    next();
+      next();
+    } catch (err) {
+      console.error('Token verification error:', err);
+      return res.status(401).json({ message: 'Invalid token' });
+    }
   };
-  
-  module.exports = verifyToken;  
+};
+
+module.exports = verifyToken;
 
 /* File: ./server/restaurant-service\models\restaurantModel.js */
 const mongoose = require('mongoose');
@@ -410,35 +631,55 @@ const restaurantController = require("../controllers/restaurantController");
 const verifyToken = require("../middleware/authMiddleware");
 const upload = require("../config/multerConfig");
 
-// Add a new restaurant should have verifyToken
-router.post(
-  "/",
-  upload.single("coverImage"),
-  upload.array("menuItemImages"),
-  restaurantController.addRestaurant
-);
+const uploadFields = upload.fields([
+    { name: 'coverImage', maxCount: 1 },
+    { name: 'menuItemImages', maxCount: 10 } // Adjust as needed
+  ]);
 
-// get by id
-router.get("/:id", restaurantController.getRestaurantById);
+// Add a new restaurant should have verifyToken
+router.post('/', 
+    (req, res, next) => {
+        // Log incoming request for debugging
+        console.log('Incoming restaurant data:', req.body);
+        next();
+    },
+    uploadFields, 
+    verifyToken(['admin', 'super_admin']), 
+    restaurantController.addRestaurant
+    );
 
 // Get nearby restaurants
 router.get("/nearby", restaurantController.getNearbyRestaurants);
 
+// Add this near the top with other routes
+router.get('/verify/:restaurantId', 
+    restaurantController.verifyRestaurant
+  );
+
+// get by id
+router.get("/:id", restaurantController.getRestaurantById);
+
 // Update restaurant availability should have verifyToken
 router.put("/:id/availability", restaurantController.toggleAvailability);
+
+router.get("/", restaurantController.getAllRestaurants); // Add this route to get all restaurants
+
+// Get restaurant availability (public)
+router.get("/:id/availability", restaurantController.getRestaurantAvailability);
+
+// Get restaurant details by ID (public)
+router.get("/:id", restaurantController.getRestaurantById);
 
 // Manage menu (add/update/remove items) shoul have verify token
 router.put(
   "/:id/menu",
   upload.single("menuItemImage"),
+  verifyToken(['admin', 'restaurant_admin']),
   restaurantController.manageMenu
 );
 
 // search restaurants
 router.get("/search", restaurantController.searchRestaurants);
-
-// check availability
-router.get("/:id/availability", restaurantController.getRestaurantAvailability);
 
 module.exports = router;
 

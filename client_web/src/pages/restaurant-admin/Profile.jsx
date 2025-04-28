@@ -18,16 +18,28 @@ const RestaurantAdminProfile = () => {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const response = await userServiceApi.get("/api/users/me");
-        setProfile(response.data.user);
+        const response = await userServiceApi.get("api/users/me");
+        console.log("Full API Response:", response); // Debug log
+        
+        // Handle nested response structure
+        const userData = response.data?.data?.user || response.data?.user || response.data;
+        
+        if (!userData) {
+          throw new Error("User data not found in response");
+        }
+
+        console.log("Extracted User Data:", userData); // Debug log
+        
+        setProfile(userData);
         setFormData({
-          name: response.data.user.name,
-          email: response.data.user.email,
-          phone: response.data.user.phone,
-          address: response.data.user.address || "",
+          name: userData.name || "",
+          email: userData.email || "",
+          phone: userData.phone || "",
+          address: userData.address || "",
         });
       } catch (err) {
-        setError(err.response?.data?.message || "Failed to fetch profile");
+        console.error("Profile fetch error:", err);
+        setError(err.response?.data?.message || err.message || "Failed to fetch profile");
       } finally {
         setLoading(false);
       }
@@ -46,17 +58,18 @@ const RestaurantAdminProfile = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await userServiceApi.patch("/api/users/update-me", formData);
-      setProfile(response.data.user);
+      const response = await userServiceApi.patch("api/users/update-me", formData);
+      const updatedUser = response.data?.data?.user || response.data?.user || response.data;
+      setProfile(updatedUser);
       setEditMode(false);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to update profile");
     }
   };
 
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div className="text-red-500">{error}</div>;
-  if (!profile) return <div>No profile data</div>;
+  if (loading) return <div className="p-6">Loading profile...</div>;
+  if (error) return <div className="p-6 text-red-500">Error: {error}</div>;
+  if (!profile) return <div className="p-6">No profile data available</div>;
 
   return (
     <div className="p-6">
@@ -73,10 +86,7 @@ const RestaurantAdminProfile = () => {
       </div>
 
       {editMode ? (
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white p-6 rounded-lg shadow"
-        >
+        <form onSubmit={handleSubmit} className="bg-white p-6 rounded-lg shadow">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -102,6 +112,7 @@ const RestaurantAdminProfile = () => {
                 onChange={handleChange}
                 className="w-full border border-gray-300 rounded-md px-3 py-2"
                 required
+                disabled
               />
             </div>
             <div>
@@ -152,20 +163,20 @@ const RestaurantAdminProfile = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <h3 className="text-sm font-medium text-gray-500">Name</h3>
-              <p className="mt-1 text-sm text-gray-900">{profile.name}</p>
+              <p className="mt-1 text-sm text-gray-900">{profile.name || "N/A"}</p>
             </div>
             <div>
               <h3 className="text-sm font-medium text-gray-500">Email</h3>
-              <p className="mt-1 text-sm text-gray-900">{profile.email}</p>
+              <p className="mt-1 text-sm text-gray-900">{profile.email || "N/A"}</p>
             </div>
             <div>
               <h3 className="text-sm font-medium text-gray-500">Phone</h3>
-              <p className="mt-1 text-sm text-gray-900">{profile.phone}</p>
+              <p className="mt-1 text-sm text-gray-900">{profile.phone || "N/A"}</p>
             </div>
             <div>
               <h3 className="text-sm font-medium text-gray-500">Restaurant</h3>
               <p className="mt-1 text-sm text-gray-900">
-                {profile.restaurantDetails?.name || "N/A"}
+                {profile.restaurantId || "N/A"}
               </p>
             </div>
             <div>

@@ -11,6 +11,7 @@ const {
   //approveRestaurantAdmin,
   createRestaurantAdmin,  // <-- Import the new controller for creating restaurant admin
   getAdminsByRestaurant,
+  removeRestaurantAdmin,
   
   // Customer
   registerCustomer,
@@ -78,17 +79,21 @@ router.get("/:id", getUser);
 router.patch("/:id", updateUser);
 router.delete("/:id", deleteUser);
 
-// ==================== RESTAURANT ADMIN CREATION ROUTE ====================
+// ==================== RESTAURANT ADMIN ROUTEs ====================
 
-// Add these routes
+router.post('/restaurant-admin', 
+  authMiddleware(['admin']), 
+  createRestaurantAdmin
+);
+
 router.get('/restaurant/:restaurantId/admins', 
   authMiddleware(['admin']), 
   getAdminsByRestaurant
 );
 
-router.post('/restaurant-admin', 
+router.delete('/restaurant-admin/:adminId', 
   authMiddleware(['admin']), 
-  createRestaurantAdmin
+  removeRestaurantAdmin
 );
 
 module.exports = router;

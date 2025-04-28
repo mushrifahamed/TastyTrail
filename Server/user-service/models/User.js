@@ -62,7 +62,6 @@ const userSchema = new mongoose.Schema({
     enum: ["pending", "approved", "rejected", "active"],
     default: function () {
       if (this.role === "delivery_personnel") return "pending";
-      if (this.role === "restaurant_admin") return "pending";
       return "active";
     },
   },

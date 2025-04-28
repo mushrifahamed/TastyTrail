@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const authService = require("../services/authService");
 const { sendEmail } = require("../services/emailService");
 const passwordUtils = require("../utils/passwordUtils");
+const axios = require('axios');
 const { JWT_SECRET, JWT_EXPIRES_IN } = process.env;
 const amqp = require("amqplib/callback_api");
 
@@ -88,64 +89,96 @@ const createAdmin = async (req, res, next) => {
 
 // ==================== RESTAURANT ADMIN METHODS ====================
 
-// Create a new Restaurant Admin
-// In your userController.js, enhance the createRestaurantAdmin function
-const createRestaurantAdmin = async (req, res, next) => {
-  try {
-    const { name, email, phone, password, restaurantId } = req.body;
-
-    // Validate restaurant exists (call restaurant service)
+  // Create a new Restaurant Admin
+  const createRestaurantAdmin = async (req, res, next) => {
     try {
-      const restaurantResponse = await axios.get(
-        `${process.env.RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`
-      );
-      if (!restaurantResponse.data) {
-        return res.status(404).json({ message: "Restaurant not found" });
+      console.log("Incoming request body:", req.body); // Log the entire request
+      const { name, email, phone, password, restaurantId } = req.body;
+
+      // Validate required fields
+      if (!name || !email || !phone || !restaurantId) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Name, email, phone and restaurantId are required'
+        });
       }
-    } catch (err) {
-      return res.status(404).json({ message: "Restaurant not found" });
-    }
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
-    if (existingUser) {
-      return res.status(400).json({ message: "Email or phone already in use" });
-    }
+      // Validate restaurant exists (call restaurant service)
+      try {
+        const restaurantResponse = await axios.get(
+          `${process.env.RESTAURANT_SERVICE_URL}/api/restaurants/verify/${restaurantId}`,
+          {
+            headers: {
+              Authorization: req.headers.authorization
+            }
+          }
+        );
+        
+        if (!restaurantResponse.data || restaurantResponse.data.status !== 'success') {
+          return res.status(404).json({ 
+            status: 'fail',
+            message: 'Restaurant not found' 
+          });
+        }
+      } catch (err) {
+        console.error('Error verifying restaurant:', err);
+        return res.status(404).json({ 
+          status: 'fail',
+          message: 'Restaurant verification failed' 
+        });
+      }
 
-    // Create the restaurant admin
-    const restaurantAdmin = await User.create({
-      name,
-      email,
-      phone,
-      password: await passwordUtils.hashPassword(password),
-      role: "restaurant_admin",
-      isActive: true,
-      restaurantId: new mongoose.Types.ObjectId(restaurantId),
-      emailVerified: true,
-      phoneVerified: true,
-    });
+      // Check if user already exists
+      const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+      if (existingUser) {
+        return res.status(400).json({ 
+          status: 'fail',
+          message: 'Email or phone already in use' 
+        });
+      }
 
-    // Send welcome email
-    if (email) {
-      await sendEmail(
+      // Generate password if not provided
+      const adminPassword = password || passwordUtils.generateRandomPassword();
+
+      // Create the restaurant admin
+      const restaurantAdmin = await User.create({
+        name,
         email,
-        "Welcome as Restaurant Admin",
-        `Hello ${name},\n\nYou have been assigned as the admin for restaurant ${restaurantId}.\n\nYour login credentials:\nEmail: ${email}\nPassword: ${password}`
-      );
+        phone,
+        password: await passwordUtils.hashPassword(adminPassword),
+        role: 'restaurant_admin',
+        isActive: true,
+        restaurantId: new mongoose.Types.ObjectId(restaurantId),
+        emailVerified: true,
+        phoneVerified: true,
+      });
+
+      // Remove sensitive data before sending response
+      restaurantAdmin.password = undefined;
+
+      // Send welcome email
+      try {
+        await sendEmail(
+          email,
+          'Welcome as Restaurant Admin',
+          `Hello ${name},\n\nYou have been assigned as the admin for restaurant ${restaurantId}.\n\nYour login credentials:\nEmail: ${email}\nPassword: ${adminPassword}`
+        );
+      } catch (emailError) {
+        console.error('Failed to send welcome email:', emailError);
+      }
+
+      res.status(201).json({
+        status: 'success',
+        data: {
+          user: restaurantAdmin
+        }
+      });
+    } catch (error) {
+      next(error);
     }
+  };
 
-    res.status(201).json({
-      status: "success",
-      data: {
-        user: restaurantAdmin,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// Add to userController.js
+// Get Admins by Restaurant
 const getAdminsByRestaurant = async (req, res, next) => {
   try {
     const { restaurantId } = req.params;
@@ -163,7 +196,8 @@ const getAdminsByRestaurant = async (req, res, next) => {
     }).select("-password -__v");
 
     res.status(200).json({
-      status: "success",
+      status: 'success',
+      results: admins.length,
       data: {
         admins,
       },
@@ -182,6 +216,7 @@ const removeRestaurantAdmin = async (req, res, next) => {
       return res.status(400).json({
         status: "fail",
         message: "Invalid admin ID format",
+
       });
     }
 
@@ -662,6 +697,7 @@ module.exports = {
   approveRestaurantAdmin,
   createRestaurantAdmin,
   getAdminsByRestaurant,
+  removeRestaurantAdmin,
 
   // Customer methods
   registerCustomer,
