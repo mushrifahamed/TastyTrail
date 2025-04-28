@@ -363,8 +363,12 @@ const registerDeliveryPerson = async (req, res, next) => {
 };
 
 // Function to publish a message to RabbitMQ when a delivery person registers
+// Define RabbitMQ URL smartly
+const rabbitmqHost = process.env.RABBITMQ_HOST || 'localhost';
+const rabbitmqURL = `amqp://${rabbitmqHost}`;
+
 const publishDeliveryPersonEvent = (deliveryPerson) => {
-  amqp.connect('amqp://localhost', (error, connection) => {
+  amqp.connect(rabbitmqURL, (error, connection) => {
     if (error) {
       throw error;
     }
@@ -374,7 +378,7 @@ const publishDeliveryPersonEvent = (deliveryPerson) => {
         throw error;
       }
 
-      const queue = 'delivery_person_registered_queue';  // Queue for delivery person registration
+      const queue = 'delivery_person_registered_queue';
       const message = JSON.stringify({
         deliveryPersonId: deliveryPerson._id,
         name: deliveryPerson.name,
@@ -383,7 +387,6 @@ const publishDeliveryPersonEvent = (deliveryPerson) => {
         vehicleLicensePlate: deliveryPerson.vehicleInfo.number,
       });
 
-      // Make sure the queue exists and then publish the message
       channel.assertQueue(queue, { durable: true });
       channel.sendToQueue(queue, Buffer.from(message), { persistent: true });
 
@@ -395,6 +398,7 @@ const publishDeliveryPersonEvent = (deliveryPerson) => {
     }, 500);
   });
 };
+
 
 module.exports = {
   registerDeliveryPerson,

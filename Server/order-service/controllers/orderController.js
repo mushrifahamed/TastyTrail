@@ -11,9 +11,11 @@ const { RESTAURANT_SERVICE_URL } = process.env;
 const amqp = require("amqplib/callback_api");
 
 // Function to publish an event to RabbitMQ
-// Function to publish the order created event to RabbitMQ
+const rabbitmqHost = process.env.RABBITMQ_HOST || 'localhost'; // Smart
+const rabbitmqURL = `amqp://${rabbitmqHost}`;
+
 const publishOrderCreatedEvent = (orderId) => {
-  amqp.connect("amqp://localhost", (error, connection) => {
+  amqp.connect(rabbitmqURL, (error, connection) => {
     if (error) {
       throw error;
     }
@@ -37,6 +39,7 @@ const publishOrderCreatedEvent = (orderId) => {
     }, 500);
   });
 };
+
 
 // Create a new order with items from a single restaurant
 const createOrder = async (req, res, next) => {

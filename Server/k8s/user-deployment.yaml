@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+      - name: user-service
+        image: tastytrail/user-service:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: PORT
+          value: "3000"
+        - name: MONGODB_URI
+          value: "mongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/user_service"
+        - name: JWT_SECRET
+          value: "8d19328e0c28fc230954c990d291c62e4ec0e8124a583c00efe0f412842f299e9b74fcc9cb2bc88331f1f3a5346e03bb95ff938d5843855bb690d4edbfcc0baf"
+        - name: JWT_EXPIRES_IN
+          value: "1d"
+        - name: NOTIFICATION_SERVICE_URL
+          value: "http://notification-service:3005"
+        - name: RESTAURANT_SERVICE_URL
+          value: "http://restaurant-service:3001"
+        - name: SMTP_HOST
+          value: "smtp.mailersend.net"
+        - name: SMTP_PORT
+          value: "587"
+        - name: SMTP_USER
+          value: "MS_G08cz3@test-ywj2lpnnqxjg7oqz.mlsender.net"
+        - name: SMTP_PASS
+          value: "mssp.cqYhMlH.vywj2lp7zk1l7oqz.N8UL91O"
+        - name: MAILERSEND_FROM_EMAIL
+          value: "segroup80@gmail.com"
+        - name: G_USER
+          value: "segroup80@gmail.com"
+        - name: G_PASS
+          value: "mnts agen lmqu tvol"
+        - name: RABBITMQ_HOST
+          value: "rabbitmq"
+

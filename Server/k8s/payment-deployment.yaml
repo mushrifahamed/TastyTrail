@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+    spec:
+      containers:
+      - name: payment-service
+        image: tastytrail/payment-service:latest
+        ports:
+        - containerPort: 3003
+        env:
+        - name: PORT
+          value: "3003"
+        - name: NODE_ENV
+          value: "development"
+        - name: JWT_SECRET
+          value: "8d19328e0c28fc230954c990d291c62e4ec0e8124a583c00efe0f412842f299e9b74fcc9cb2bc88331f1f3a5346e03bb95ff938d5843855bb690d4edbfcc0baf"
+        - name: INTERNAL_API_KEY
+          value: "47a4768588747092df308bd0417c3efaade97ff8ba47d17ba90720be55f6c62f"
+
+        # MongoDB
+        - name: MONGODB_URI
+          value: "mongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/payment_service"
+
+        # PayHere Configuration
+        - name: PAYHERE_MERCHANT_ID
+          value: "1230199"
+        - name: PAYHERE_MERCHANT_SECRET
+          value: "MjY3MzgyNDY4NjMzNTQ5NjgwOTY5MjE0ODU2ODM4NDAyODA0MzE="
+        - name: PAYHERE_APP_ID
+          value: "4OVxzCXPhb64JFnJVGW6eH3HB"
+        - name: PAYHERE_APP_SECRET
+          value: "48blpHobDGu4ZCclTnhsxv8W3yUrAPqVl4eSlZBPnDso"
+        - name: PAYHERE_SANDBOX
+          value: "true"
+
+        # PayHere API Endpoint
+        - name: PAYHERE_API_ENDPOINT
+          value: "https://www.payhere.lk/pay/checkout"
+
+        # PayHere Callback URLs (must use delivery-service service name)
+        - name: PAYHERE_RETURN_URL
+          value: "http://delivery-service:3008/payment/success"
+        - name: PAYHERE_CANCEL_URL
+          value: "http://delivery-service:3008/payment/cancel"
+        - name: PAYHERE_NOTIFY_URL
+          value: "http://delivery-service:3008/api/payments/notify"
+
+        # Internal Services
+        - name: USER_SERVICE_URL
+          value: "http://user-service:3000"
+        - name: ORDER_SERVICE_URL
+          value: "http://order-service:3002"
