@@ -262,6 +262,45 @@ const getRestaurantById = async (req, res) => {
   }
 };
 
+// Verify Restaurant Existence
+const verifyRestaurant = async (req, res) => {
+  const { restaurantId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+    return res.status(400).json({
+      status: "fail",
+      message: "Invalid restaurant ID format",
+    });
+  }
+
+  try {
+    const restaurant = await Restaurant.findById(restaurantId);
+    if (!restaurant) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Restaurant not found",
+      });
+    }
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        exists: true,
+        restaurant: {
+          id: restaurant._id,
+          name: restaurant.name,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Error verifying restaurant:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Error verifying restaurant",
+    });
+  }
+};
+
 //get all restaurants
 const getAllRestaurants = async (req, res) => {
   try {
