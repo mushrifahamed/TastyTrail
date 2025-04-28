@@ -7,7 +7,7 @@ import 'auth_service.dart';
 
 class RestaurantService {
   final AuthService _authService = AuthService();
-  final String _baseUrl = ApiConstants.baseUrl;
+  final String _baseUrl = ApiConstants.restaurantBaseUrl;
 
   Future<List<Restaurant>> getNearbyRestaurants({
     required double latitude,
@@ -43,32 +43,20 @@ class RestaurantService {
   }
 
   Future<Restaurant> getRestaurantById(String id) async {
-    try {
-      final token = await _authService.getToken();
-      if (token == null) {
-        throw Exception('Authentication token not found');
-      }
+    final token = await _authService.getToken();
 
-      final response = await http.get(
-        Uri.parse('$_baseUrl/restaurants/$id'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+    final response = await http.get(
+      Uri.parse('$_baseUrl/$id'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    );
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        if (data['success'] == true) {
-          return Restaurant.fromJson(data['data']);
-        } else {
-          throw Exception(data['message'] ?? 'Failed to load restaurant');
-        }
-      } else {
-        throw Exception('Failed to load restaurant: ${response.statusCode}');
-      }
-    } catch (e) {
-      throw Exception('Failed to load restaurant: $e');
+    if (response.statusCode == 200) {
+      return Restaurant.fromJson(json.decode(response.body));
+    } else {
+      throw Exception('Failed to load restaurant: ${response.body}');
     }
   }
 

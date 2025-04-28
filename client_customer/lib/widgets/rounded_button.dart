@@ -14,7 +14,7 @@ class RoundedButton extends StatelessWidget {
   final double? borderRadius;
 
   const RoundedButton({
-    Key? key,
+    super.key,
     required this.text,
     required this.onPressed,
     this.isLoading = false,
@@ -23,7 +23,7 @@ class RoundedButton extends StatelessWidget {
     this.height,
     this.width,
     this.borderRadius,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -40,12 +40,11 @@ class RoundedButton extends StatelessWidget {
           ),
           textStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: 18.sp),
         ),
-        child:
-            isLoading
-                ? const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                )
-                : Text(text),
+        child: isLoading
+            ? const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              )
+            : Text(text),
       ),
     );
   }

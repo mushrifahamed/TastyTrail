@@ -1,0 +1,4582 @@
+
+/* File: ./server\delivery-service\server.js */
+require('dotenv').config(); // Load environment variables from .env file
+const connectDB = require("./config/db");
+const express = require('express');
+const mongoose = require('mongoose');
+const http = require('http');
+const socketIo = require('socket.io');
+const messageBroker = require('./utils/messagebroker_neworder'); // Correctly import your message broker
+const deliveryRoutes = require('./routes/deliveryRoutes'); // Delivery routes
+
+const app = express();
+
+// MongoDB connection
+connectDB();
+
+// Start listening for new orders from RabbitMQ
+messageBroker.listenForNewOrders(); // Make sure listenForNewOrders() is implemented correctly
+
+// Create server and setup socket.io
+const server = http.createServer(app);
+const io = socketIo(server);
+
+// Handle WebSocket connections
+io.on('connection', (socket) => {
+  console.log('A user connected');
+
+  socket.on('statusUpdate', (data) => {
+    io.emit('statusUpdate', data); // Broadcast the update to all connected clients
+  });
+
+  socket.on('disconnect', () => {
+    console.log('A user disconnected');
+  });
+});
+
+// Middleware setup (if you need to parse JSON or set headers)
+app.use(express.json()); // This will parse incoming requests with JSON payloads
+
+// Use delivery routes
+app.use('/api/delivery', deliveryRoutes);
+
+// Define the server port
+const PORT = process.env.PORT || 3008;
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
+
+
+/* File: ./server\delivery-service\config\db.js */
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const connectDB = async () => {
+    try {
+        console.log("Mongo URI: ", process.env.MONGODB_URI);  // Log the Mongo URI
+        mongoose.connect(process.env.MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+        })
+        .then(() => console.log('Connected to MongoDB'))
+        .catch(err => console.error('MongoDB connection error:', err));
+    } catch (error) {
+        console.error("Error connecting to MongoDB:", error.message);
+        process.exit(1); // Exit process with failure
+    }
+};
+
+module.exports = connectDB;
+
+
+/* File: ./server\delivery-service\controllers\deliveryController.js */
+const Order = require('../models/orders');
+const DeliveryPerson = require('../models/deliveryPerson');
+
+const assignDelivery = async (req, res) => {
+    const { orderId, requiredVehicleType } = req.body;
+  
+    try {
+      // Find the order by ID
+      const order = await Order.findById(orderId);
+      if (!order) {
+        return res.status(404).send({ message: 'Order not found' });
+      }
+  
+      // Find the available delivery person with the required vehicle type
+      const availableDriver = await DeliveryPerson.findOne({ 
+        availability: true,
+        vehicleType: requiredVehicleType,
+      });
+  
+      if (!availableDriver) {
+        return res.status(400).send({ message: 'No available delivery personnel with the required vehicle type' });
+      }
+  
+      // Assign delivery to the driver
+      order.deliveryPersonId = availableDriver._id;
+      order.status = 'Assigned';
+      await order.save();
+  
+      // Update the delivery person's availability
+      availableDriver.availability = false;
+      await availableDriver.save();
+  
+      res.status(200).send({ message: 'Delivery assigned', order });
+    } catch (error) {
+      console.error(error);
+      res.status(500).send({ message: 'Internal server error' });
+    }
+  };
+
+  // Get the current status of an order
+const getDeliveryStatus = async (req, res) => {
+    const { orderId } = req.params;
+    const order = await Order.findById(orderId);
+  
+    if (!order) {
+      return res.status(404).send({ message: 'Order not found' });
+    }
+  
+    res.status(200).send({ orderId, status: order.status });
+  };
+  
+  // Update the status of an order (e.g., when delivery person accepts, starts delivery, etc.)
+  const updateOrderStatus = async (req, res) => {
+    const { orderId, newStatus } = req.body;
+  
+    try {
+      const order = await Order.findById(orderId);
+      if (!order) {
+        return res.status(404).send({ message: 'Order not found' });
+      }
+  
+      // Ensure the new status is valid
+      const validStatuses = ['Pending', 'Assigned', 'Accepted', 'Picked Up', 'In Transit', 'Delivered', 'Cancelled'];
+      if (!validStatuses.includes(newStatus)) {
+        return res.status(400).send({ message: 'Invalid status' });
+      }
+  
+      // Update the order status
+      order.status = newStatus;
+      await order.save();
+  
+      // Broadcast status update to clients using Socket.io (optional, for real-time updates)
+      io.emit('statusUpdate', { orderId, newStatus }); 
+  
+      res.status(200).send({ message: 'Order status updated', order });
+    } catch (error) {
+      console.error(error);
+      res.status(500).send({ message: 'Internal server error' });
+    }
+  };
+
+  module.exports = {
+    assignDelivery,
+    getDeliveryStatus,
+    updateOrderStatus,
+  };
+
+  
+  
+
+
+/* File: ./server\delivery-service\models\deliveryPerson.js */
+const mongoose = require('mongoose');
+
+const deliveryPersonSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  phone: { type: String, required: true },
+  location: { type: String, required: true }, // Coordinates (latitude, longitude)
+  availability: { type: Boolean, default: true },
+  vehicleType: { type: String, required: true }, 
+  vehicleLicensePlate: { type: String, required: true },
+});
+
+module.exports = mongoose.model('DeliveryPerson', deliveryPersonSchema);
+
+
+/* File: ./server\delivery-service\models\orders.js */
+const mongoose = require('mongoose');
+
+const orderSchema = new mongoose.Schema({
+  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
+  restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant' },
+  status: {
+    type: String,
+    enum: ['Pending', 'Assigned', 'Accepted', 'Picked Up', 'In Transit', 'Delivered', 'Cancelled'],
+    default: 'Pending',
+  },
+  deliveryPersonId: { type: mongoose.Schema.Types.ObjectId, ref: 'DeliveryPerson', default: null },
+  deliveryLocation: String,
+  deliveryTime: Date,
+});
+
+module.exports = mongoose.model('Order', orderSchema); 
+
+
+/* File: ./server\delivery-service\routes\deliveryRoutes.js */
+const express = require('express');
+const router = express.Router();
+const { assignDelivery, getDeliveryStatus, updateOrderStatus } = require('../controllers/deliveryController');
+
+// Route to assign a delivery to a driver
+router.post('/assign', assignDelivery);
+
+// Route to get the current status of a delivery
+router.get('/status/:orderId', getDeliveryStatus);
+
+// Route to update the status of an order
+router.put('/update-status', updateOrderStatus);  // Method for updating the status of an order
+
+module.exports = router;
+
+
+/* File: ./server\delivery-service\utils\messagebroker_neworder.js */
+const amqp = require('amqplib/callback_api');
+const DeliveryPerson = require('../models/deliveryPerson');
+const Order = require('../models/orders');
+
+const listenForNewOrders = () => {
+    amqp.connect('amqp://localhost', (error, connection) => {
+        if (error) {
+            throw error;
+        }
+
+        connection.createChannel((error, channel) => {
+            if (error) {
+                throw error;
+            }
+
+            const queue = 'order_created_queue'; // Queue name used by Order Service
+
+            channel.assertQueue(queue, { durable: true });
+            console.log('Waiting for new orders...');
+
+            channel.consume(queue, async (msg) => {
+                if (msg !== null) {
+                    const order = JSON.parse(msg.content.toString());
+                    console.log(`Received order ID: ${order.orderId}`);
+
+                    // Process the order in the Delivery Service (assign delivery to driver)
+                    await assignDelivery(order.orderId);
+
+                    // Acknowledge the message after processing
+                    channel.ack(msg);
+                }
+            });
+        });
+    });
+};
+
+const assignDelivery = async (orderId) => {
+    try {
+        const order = await Order.findById(orderId);
+        if (!order) {
+            console.log(`Order not found: ${orderId}`);
+            return;
+        }
+
+        const availableDriver = await DeliveryPerson.findOne({ availability: true });
+        if (!availableDriver) {
+            console.log(`No available drivers for order ${orderId}`);
+            return;
+        }
+
+        // Assign the delivery to the available driver
+        order.deliveryPersonId = availableDriver._id;
+        order.status = 'Assigned';
+        await order.save();
+
+        // Update the delivery person's availability
+        availableDriver.availability = false;
+        await availableDriver.save();
+
+        console.log(`Assigned driver ${availableDriver._id} to order ${orderId}`);
+    } catch (error) {
+        console.error('Error assigning delivery:', error);
+    }
+};
+
+module.exports = { listenForNewOrders };
+
+
+/* File: ./server\notification-service\server.js */
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+require("dotenv").config();
+const connectDB = require("./config/db");
+
+const app = express();
+connectDB();
+
+app.use(cors());
+app.use(bodyParser.json());
+
+const notificationRoutes = require("./routes/notificationRoutes");
+app.use("/api/notifications", notificationRoutes);
+
+
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Notification Service running on port ${PORT}`));
+
+
+/* File: ./server\notification-service\config\db.js */
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log("MongoDB connected");
+  } catch (error) {
+    console.error("MongoDB connection failed", error);
+    process.exit(1);
+  }
+};
+
+module.exports = connectDB;
+
+
+/* File: ./server\notification-service\controllers\notificationController.js */
+const Token = require("../models/Token");
+const { sendNotification } = require("../services/fcmService");
+
+// Register token
+exports.registerToken = async (req, res) => {
+  const { userId, token, role } = req.body;
+
+  if (!userId || !token || !role) {
+    return res.status(400).json({ message: "Missing fields" });
+  }
+
+  const existing = await Token.findOne({ userId, role });
+  if (existing) {
+    existing.token = token;
+    existing.updatedAt = new Date();
+    await existing.save();
+  } else {
+    await Token.create({ userId, token, role });
+  }
+
+  res.json({ message: "Token registered successfully" });
+};
+
+// Send to a specific user
+exports.sendToUser = async (req, res) => {
+  const { userId, role, title, body, data } = req.body;
+
+  const user = await Token.findOne({ userId, role });
+  if (!user) return res.status(404).json({ message: "Token not found" });
+
+  try {
+    await sendNotification(user.token, title, body, data);
+    res.json({ message: "Notification sent" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to send", error: err.message });
+  }
+};
+
+// Broadcast to all users by role
+exports.broadcast = async (req, res) => {
+  const { role, title, body, data } = req.body;
+
+  const users = await Token.find({ role });
+  let results = [];
+
+  for (const user of users) {
+    try {
+      const res = await sendNotification(user.token, title, body, data);
+      results.push({ userId: user.userId, result: res });
+    } catch (err) {
+      results.push({ userId: user.userId, error: err.message });
+    }
+  }
+
+  res.json({ message: "Broadcast complete", results });
+};
+
+
+/* File: ./server\notification-service\models\Token.js */
+const mongoose = require("mongoose");
+
+const TokenSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  token: { type: String, required: true },
+  role: { type: String, enum: ["customer", "admin", "delivery"], required: true },
+  updatedAt: { type: Date, default: Date.now },
+});
+
+module.exports = mongoose.model("Token", TokenSchema);
+
+
+/* File: ./server\notification-service\routes\notificationRoutes.js */
+const express = require("express");
+const router = express.Router();
+const controller = require("../controllers/notificationController");
+
+router.post("/register", controller.registerToken);
+router.post("/sendToUser", controller.sendToUser);
+router.post("/broadcast", controller.broadcast);
+
+module.exports = router;
+
+
+/* File: ./server\notification-service\services\fcmService.js */
+const admin = require("firebase-admin");
+const serviceAccount = require("../tastytrail-c628e-firebase-adminsdk-fbsvc-d49e61e481.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+const sendNotification = async (token, title, body, data = {}) => {
+  const message = {
+    token,
+    notification: { title, body },
+    data,
+  };
+
+  return await admin.messaging().send(message);
+};
+
+module.exports = { sendNotification };
+
+
+/* File: ./server\order-service\server.js */
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const morgan = require("morgan");
+const connectDB = require("./config/db");
+const orderRoutes = require("./routes/orderRoutes");
+const cartRoutes = require("./routes/cartRoutes");
+const errorHandler = require("./utils/errorHandler");
+require("dotenv").config();
+
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(morgan("dev"));
+
+// Database connection
+connectDB();
+
+// Routes
+app.use("/api/orders", orderRoutes);
+app.use("/api/cart", cartRoutes);
+
+// Error handling middleware
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 3002;
+app.listen(PORT, () => {
+  console.log(`Order service running on port ${PORT}`);
+});
+
+module.exports = app;
+
+
+/* File: ./server\order-service\config\db.js */
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log("MongoDB connected successfully");
+  } catch (error) {
+    console.error("MongoDB connection error:", error);
+    process.exit(1);
+  }
+};
+
+module.exports = connectDB;
+
+
+/* File: ./server\order-service\controllers\cartController.js */
+const Cart = require("../models/Cart");
+const restaurantService = require("../services/restaurantService");
+const userService = require("../services/userService");
+const paymentService = require("../services/paymentService");
+const estimationService = require("../services/estimationService");
+const orderSplitter = require("../services/orderSplitter");
+const Order = require("../models/Order");
+const amqp = require("amqplib/callback_api");
+
+// Function to publish the order created event to RabbitMQ
+const publishOrderCreatedEvent = (orderId) => {
+  amqp.connect("amqp://localhost", (error, connection) => {
+    if (error) {
+      console.error("RabbitMQ connection error:", error);
+      return;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        console.error("RabbitMQ channel error:", error);
+        return;
+      }
+
+      const queue = "order_created_queue";
+      const msg = JSON.stringify({ orderId });
+
+      channel.assertQueue(queue, { durable: true });
+      channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
+
+      console.log(`Order Created Event Sent: ${msg}`);
+    });
+
+    setTimeout(() => {
+      connection.close();
+    }, 500);
+  });
+};
+
+// Get cart contents
+const getCart = async (req, res, next) => {
+  try {
+    const customerId = req.user.id;
+
+    let cart = await Cart.findOne({ customerId });
+    if (!cart) {
+      cart = new Cart({ customerId, items: [] });
+      await cart.save();
+    }
+
+    res.status(200).json(cart);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Add item to cart
+const addToCart = async (req, res, next) => {
+  try {
+    const customerId = req.user.id;
+    const { restaurantId, menuItemId, name, price, quantity } = req.body;
+
+    // Validate restaurant availability
+    const restaurantAvailability =
+      await restaurantService.getRestaurantAvailability(restaurantId);
+    if (!restaurantAvailability.isAvailable) {
+      return res
+        .status(400)
+        .json({ message: "Restaurant is not available for orders" });
+    }
+
+    let cart = await Cart.findOne({ customerId });
+    if (!cart) {
+      cart = new Cart({ customerId, items: [] });
+    }
+
+    // Check if cart already has items from a different restaurant
+    const existingRestaurantIds = [
+      ...new Set(cart.items.map((item) => item.restaurantId.toString())),
+    ];
+    if (
+      existingRestaurantIds.length > 0 &&
+      !existingRestaurantIds.includes(restaurantId.toString())
+    ) {
+      // We'll still allow adding the item, but include a warning
+      cart.items.push({ restaurantId, menuItemId, name, price, quantity });
+      await cart.save();
+
+      return res.status(200).json({
+        cart,
+        warning:
+          "Your cart now contains items from multiple restaurants. These will be processed as separate orders during checkout.",
+      });
+    }
+
+    // Check if item already exists in cart
+    const existingItemIndex = cart.items.findIndex(
+      (item) =>
+        item.menuItemId.toString() === menuItemId &&
+        item.restaurantId.toString() === restaurantId
+    );
+
+    if (existingItemIndex > -1) {
+      // Update quantity if item exists
+      cart.items[existingItemIndex].quantity += quantity;
+    } else {
+      // Add new item
+      cart.items.push({ restaurantId, menuItemId, name, price, quantity });
+    }
+
+    await cart.save();
+    res.status(200).json(cart);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Update cart item quantity
+const updateCartItem = async (req, res, next) => {
+  try {
+    const customerId = req.user.id;
+    const { itemId, quantity } = req.body;
+
+    const cart = await Cart.findOne({ customerId });
+    if (!cart) {
+      return res.status(404).json({ message: "Cart not found" });
+    }
+
+    const itemIndex = cart.items.findIndex(
+      (item) => item._id.toString() === itemId
+    );
+    if (itemIndex === -1) {
+      return res.status(404).json({ message: "Item not found in cart" });
+    }
+
+    if (quantity <= 0) {
+      // Remove item if quantity is 0 or negative
+      cart.items.splice(itemIndex, 1);
+    } else {
+      // Update quantity
+      cart.items[itemIndex].quantity = quantity;
+    }
+
+    await cart.save();
+    res.status(200).json(cart);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Remove item from cart
+const removeFromCart = async (req, res, next) => {
+  try {
+    const customerId = req.user.id;
+    const { itemId } = req.params;
+
+    const cart = await Cart.findOne({ customerId });
+    if (!cart) {
+      return res.status(404).json({ message: "Cart not found" });
+    }
+
+    cart.items = cart.items.filter((item) => item._id.toString() !== itemId);
+
+    await cart.save();
+    res.status(200).json(cart);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Clear cart
+const clearCart = async (req, res, next) => {
+  try {
+    const customerId = req.user.id;
+
+    const cart = await Cart.findOne({ customerId });
+    if (!cart) {
+      return res.status(404).json({ message: "Cart not found" });
+    }
+
+    cart.items = [];
+    await cart.save();
+
+    res.status(200).json({ message: "Cart cleared successfully", cart });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Convert cart to order(s)
+const checkoutCart = async (req, res, next) => {
+  try {
+    const customerId = req.user.id;
+    const { deliveryAddress, deliveryLocation } = req.body;
+    const token = req.headers.authorization?.split(" ")[1];
+
+    const cart = await Cart.findOne({ customerId });
+    if (!cart || cart.items.length === 0) {
+      return res.status(400).json({ message: "Cart is empty" });
+    }
+
+    // Get customer info from user service
+    let customerInfo;
+    try {
+      customerInfo = await userService.getUserInfo(customerId, token);
+    } catch (error) {
+      console.error("Failed to get user info, using fallback data:", error);
+      customerInfo = {
+        name: "Customer",
+        phone: "Unknown",
+      };
+    }
+
+    // Group cart items by restaurant
+    const itemsByRestaurant = {};
+    cart.items.forEach((item) => {
+      if (!itemsByRestaurant[item.restaurantId]) {
+        itemsByRestaurant[item.restaurantId] = [];
+      }
+      itemsByRestaurant[item.restaurantId].push(item);
+    });
+
+    // Create separate orders for each restaurant
+    const orderPromises = Object.keys(itemsByRestaurant).map(
+      async (restaurantId) => {
+        const restaurantItems = itemsByRestaurant[restaurantId];
+
+        // Calculate total amount for this restaurant's items
+        const totalAmount = orderSplitter.calculateOrderTotal(restaurantItems);
+
+        // Calculate estimated delivery time
+        const estimatedTime = await estimationService.calculateEstimatedTime(
+          restaurantItems,
+          deliveryLocation,
+          [restaurantId]
+        );
+
+        // Create order for this restaurant
+        const order = new Order({
+          customerId,
+          customerInfo: {
+            name: customerInfo.name || "Customer",
+            phone: customerInfo.phone || "Unknown",
+          },
+          items: restaurantItems,
+          deliveryAddress,
+          deliveryLocation,
+          totalAmount,
+          paymentStatus: "pending",
+          estimatedDeliveryTime: estimatedTime,
+          trackingStatus: "placed",
+          statusUpdates: [
+            {
+              status: "placed",
+              timestamp: Date.now(),
+              note: "Order placed successfully",
+            },
+          ],
+          restaurantId,
+        });
+
+        // Save the order
+        const savedOrder = await order.save();
+
+        // Initiate payment process for this order
+        const paymentResponse = await paymentService.createPayment(
+          savedOrder._id,
+          totalAmount,
+          customerId,
+          `Order #${savedOrder._id} for restaurant ${restaurantId}`,
+          token
+        );
+
+        // Update order with payment ID
+        savedOrder.paymentId = paymentResponse.paymentId;
+        await savedOrder.save();
+
+        return {
+          order: savedOrder,
+          payment: {
+            paymentId: paymentResponse.paymentId,
+            checkoutUrl: paymentResponse.checkoutUrl,
+            paymentParams: paymentResponse.paymentParams,
+          },
+        };
+      }
+    );
+
+    // Wait for all orders to be created
+    const results = await Promise.all(orderPromises);
+
+    // Clear cart after successful orders
+    cart.items = [];
+    await cart.save();
+
+    res.status(201).json({
+      message: `Created ${results.length} orders from your cart`,
+      orders: results,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Checkout items from a specific restaurant only - NEW FUNCTION
+const checkoutRestaurant = async (req, res, next) => {
+  try {
+    const customerId = req.user.id;
+    const { restaurantId, deliveryAddress } = req.body;
+    const token = req.headers.authorization?.split(" ")[1];
+
+    // Use default delivery location if not provided
+    const deliveryLocation = req.body.deliveryLocation || { lat: 0, lng: 0 };
+
+    const cart = await Cart.findOne({ customerId });
+    if (!cart || cart.items.length === 0) {
+      return res.status(400).json({ message: "Cart is empty" });
+    }
+
+    // Filter for items only from the specified restaurant
+    const restaurantItems = cart.items.filter(
+      (item) => item.restaurantId.toString() === restaurantId.toString()
+    );
+
+    if (restaurantItems.length === 0) {
+      return res.status(400).json({
+        message: "No items found for this restaurant in your cart",
+      });
+    }
+
+    // Get customer info from user service
+    let customerInfo;
+    try {
+      customerInfo = await userService.getUserInfo(customerId, token);
+    } catch (error) {
+      console.error("Failed to get user info, using fallback data:", error);
+      customerInfo = {
+        name: "Customer",
+        phone: "Unknown",
+      };
+    }
+
+    // Calculate total amount for this restaurant's items
+    const totalAmount = orderSplitter.calculateOrderTotal(restaurantItems);
+
+    // Calculate estimated delivery time
+    const estimatedTime = await estimationService.calculateEstimatedTime(
+      restaurantItems,
+      deliveryLocation,
+      [restaurantId]
+    );
+
+    // Create order for this restaurant
+    const order = new Order({
+      customerId,
+      customerInfo: {
+        name: customerInfo.name || "Customer",
+        phone: customerInfo.phone || "Unknown",
+      },
+      items: restaurantItems,
+      deliveryAddress,
+      deliveryLocation,
+      totalAmount,
+      paymentStatus: "pending",
+      estimatedDeliveryTime: estimatedTime,
+      trackingStatus: "placed",
+      statusUpdates: [
+        {
+          status: "placed",
+          timestamp: Date.now(),
+          note: "Order placed successfully",
+        },
+      ],
+      restaurantId,
+    });
+
+    // Save the order
+    const savedOrder = await order.save();
+
+    // Initiate payment process for this order
+    const paymentResponse = await paymentService.createPayment(
+      savedOrder._id,
+      totalAmount,
+      customerId,
+      `Order #${savedOrder._id} for restaurant ${restaurantId}`,
+      token
+    );
+
+    // Update order with payment ID
+    savedOrder.paymentId = paymentResponse.paymentId;
+    await savedOrder.save();
+
+    // Publish the order created event to RabbitMQ
+    publishOrderCreatedEvent(savedOrder._id);
+
+    // IMPORTANT FIX: Remove ONLY the items from this restaurant
+    cart.items = cart.items.filter(
+      (item) => item.restaurantId.toString() !== restaurantId.toString()
+    );
+    await cart.save();
+
+    res.status(201).json({
+      message: "Order created successfully",
+      order: savedOrder,
+      payment: {
+        paymentId: paymentResponse.paymentId,
+        checkoutUrl: paymentResponse.checkoutUrl,
+        paymentParams: paymentResponse.paymentParams,
+      },
+      cart: cart, // Return the updated cart with remaining items
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = {
+  getCart,
+  addToCart,
+  updateCartItem,
+  removeFromCart,
+  clearCart,
+  checkoutCart,
+  checkoutRestaurant, // Export the new function
+};
+
+
+/* File: ./server\order-service\controllers\orderController.js */
+const Order = require("../models/Order");
+const Cart = require("../models/Cart");
+const axios = require("axios");
+const orderSplitter = require("../services/orderSplitter");
+const restaurantService = require("../services/restaurantService");
+const paymentService = require("../services/paymentService");
+const notificationService = require("../services/notificationService");
+const estimationService = require("../services/estimationService");
+const userService = require("../services/userService");
+const { RESTAURANT_SERVICE_URL } = process.env;
+const amqp = require("amqplib/callback_api");
+
+// Function to publish an event to RabbitMQ
+// Function to publish the order created event to RabbitMQ
+const publishOrderCreatedEvent = (orderId) => {
+  amqp.connect("amqp://localhost", (error, connection) => {
+    if (error) {
+      throw error;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        throw error;
+      }
+
+      const queue = "order_created_queue"; // Queue name where delivery service listens
+      const msg = JSON.stringify({ orderId }); // Message payload (only orderId)
+
+      channel.assertQueue(queue, { durable: true });
+      channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
+
+      console.log(`Order Created Event Sent: ${msg}`);
+    });
+
+    setTimeout(() => {
+      connection.close();
+    }, 500);
+  });
+};
+
+// Create a new order with items from a single restaurant
+const createOrder = async (req, res, next) => {
+  try {
+    const {
+      customerId,
+      customerInfo,
+      items,
+      deliveryAddress,
+      deliveryLocation,
+    } = req.body;
+
+    // Ensure all items are from the same restaurant
+    const restaurantIds = [
+      ...new Set(items.map((item) => item.restaurantId.toString())),
+    ];
+    if (restaurantIds.length > 1) {
+      return res.status(400).json({
+        message: "An order can only contain items from a single restaurant",
+        restaurantIds,
+      });
+    }
+
+    const restaurantId = restaurantIds[0];
+
+    // Validate restaurant availability
+    const restaurantAvailability =
+      await restaurantService.getRestaurantAvailability(restaurantId);
+    if (!restaurantAvailability.isAvailable) {
+      return res.status(400).json({
+        message: "Restaurant is not available for orders",
+        restaurantId,
+      });
+    }
+
+    // Calculate total amount
+    const totalAmount = orderSplitter.calculateOrderTotal(items);
+
+    // Calculate estimated delivery time
+    const estimatedTime = await estimationService.calculateEstimatedTime(
+      items,
+      deliveryLocation,
+      [restaurantId]
+    );
+
+    // Create the order
+    const order = new Order({
+      customerId,
+      customerInfo,
+      items,
+      deliveryAddress,
+      deliveryLocation,
+      totalAmount,
+      paymentStatus: "pending",
+      estimatedDeliveryTime: estimatedTime,
+      trackingStatus: "placed",
+      statusUpdates: [
+        {
+          status: "placed",
+          timestamp: Date.now(),
+          note: "Order placed successfully",
+        },
+      ],
+      restaurantId,
+    });
+
+    const savedOrder = await order.save();
+
+    // Create response data object
+    const responseData = {
+      order: savedOrder,
+    };
+
+    let paymentResponse;
+
+    // Initiate payment process
+    try {
+      const token = req.headers.authorization?.split(" ")[1];
+      console.log("Token being used:", token); // Debug log
+      paymentResponse = await paymentService.createPayment(
+        savedOrder._id,
+        totalAmount,
+        customerId,
+        `Order #${savedOrder._id} with ${items.length} items`,
+        token
+      );
+
+      // Store payment ID in order
+      savedOrder.paymentId = paymentResponse.paymentId;
+      await savedOrder.save();
+
+      // Include payment information in response
+      responseData.payment = {
+        paymentId: paymentResponse.paymentId,
+        checkoutUrl: paymentResponse.checkoutUrl,
+        paymentParams: paymentResponse.paymentParams,
+      };
+    } catch (error) {
+      console.error("Error initiating payment:", error);
+      return res.status(500).json({ message: "Error initiating payment" });
+    }
+
+    // Now paymentResponse is accessible here
+    if (paymentResponse) {
+      // Update order with payment ID
+      savedOrder.paymentId = paymentResponse.paymentId;
+      await savedOrder.save();
+    }
+
+    // Publish the order created event to RabbitMQ after the order is created
+    publishOrderCreatedEvent(savedOrder._id);
+
+    res.status(201).json(savedOrder);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get order details
+const getOrderWithSubOrders = async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate("customerId", "name email")
+      .populate("items.restaurantId", "name address")
+      .populate("restaurantId", "name address")
+      .populate("deliveryPersonId", "name phone");
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    res.json(order);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get orders by customer
+const getCustomerOrders = async (req, res, next) => {
+  try {
+    const orders = await Order.find({ customerId: req.params.customerId })
+      .sort({ createdAt: -1 })
+      .populate("restaurantId", "name");
+
+    res.json(orders);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get orders by restaurant
+const getRestaurantOrders = async (req, res, next) => {
+  try {
+    const orders = await Order.find({
+      restaurantId: req.params.restaurantId,
+    })
+      .sort({ createdAt: -1 })
+      .populate("customerId", "name");
+
+    res.json(orders);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Update order tracking status
+const updateOrderStatus = async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+    const { status, note } = req.body;
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Update tracking status
+    order.trackingStatus = status;
+
+    // Add to status updates history
+    order.statusUpdates.push({
+      status,
+      timestamp: Date.now(),
+      note: note || "",
+    });
+
+    // If status is out_for_delivery, assign delivery person
+    if (
+      status === "out_for_delivery" &&
+      req.user.role === "delivery_personnel"
+    ) {
+      order.deliveryPersonId = req.user.id;
+    }
+
+    await order.save();
+
+    // Notify customer about status update
+    await notificationService.sendNotification(
+      order.customerId,
+      "order_status_update",
+      `Your order #${order._id} is now ${status}`,
+      { orderId: order._id, status }
+    );
+
+    res.status(200).json(order);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get orders assigned to delivery person
+const getDeliveryPersonOrders = async (req, res, next) => {
+  try {
+    const deliveryPersonId = req.user.id;
+
+    const orders = await Order.find({
+      deliveryPersonId,
+      trackingStatus: { $in: ["ready_for_pickup", "out_for_delivery"] },
+    })
+      .sort({ createdAt: -1 })
+      .populate("customerId", "name")
+      .populate("items.restaurantId", "name address")
+      .populate("restaurantId", "name address");
+
+    res.json(orders);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get specific order for delivery person
+const getDeliveryOrder = async (req, res, next) => {
+  try {
+    const deliveryPersonId = req.user.id;
+    const orderId = req.params.id;
+
+    const order = await Order.findOne({
+      _id: orderId,
+      deliveryPersonId,
+    })
+      .populate("customerId", "name email")
+      .populate("items.restaurantId", "name address")
+      .populate("restaurantId", "name address");
+
+    if (!order) {
+      return res
+        .status(404)
+        .json({ message: "Order not found or not assigned to you" });
+    }
+
+    res.json(order);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const updateOrderPaymentStatus = async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+    const { paymentStatus, paymentId } = req.body;
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Update payment status
+    order.paymentStatus = paymentStatus;
+    order.paymentId = paymentId;
+
+    // If payment is completed, update order status
+    if (paymentStatus === "completed") {
+      order.trackingStatus = "confirmed";
+      order.statusUpdates.push({
+        status: "confirmed",
+        timestamp: Date.now(),
+        note: "Payment completed, order confirmed",
+      });
+
+      // Notify customer about confirmed order
+      await notificationService
+        .sendNotification(
+          order.customerId,
+          "order_confirmed",
+          `Your order #${order._id} has been confirmed and is being prepared`,
+          { orderId: order._id }
+        )
+        .catch((err) => console.error("Notification service error:", err));
+    } else if (paymentStatus === "failed" || paymentStatus === "cancelled") {
+      order.trackingStatus = "cancelled";
+      order.statusUpdates.push({
+        status: "cancelled",
+        timestamp: Date.now(),
+        note: "Order cancelled due to payment issues",
+      });
+
+      // Notify customer about cancelled order
+      await notificationService
+        .sendNotification(
+          order.customerId,
+          "order_cancelled",
+          `Your order #${order._id} has been cancelled due to payment issues`,
+          { orderId: order._id }
+        )
+        .catch((err) => console.error("Notification service error:", err));
+    }
+
+    await order.save();
+    res.status(200).json({ message: "Order payment status updated", order });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const updateSubOrderStatus = async (req, res, next) => {
+  try {
+    const { subOrderId } = req.params;
+    const { status, note } = req.body;
+
+    // Find the order containing this sub-order
+    const order = await Order.findOne({ "items._id": subOrderId });
+
+    if (!order) {
+      return res.status(404).json({ message: "Sub-order not found" });
+    }
+
+    // Find the specific item in the order
+    const subOrderIndex = order.items.findIndex(
+      (item) => item._id.toString() === subOrderId
+    );
+
+    if (subOrderIndex === -1) {
+      return res.status(404).json({ message: "Sub-order not found in order" });
+    }
+
+    // Update the status of the sub-order
+    order.items[subOrderIndex].status = status;
+
+    // Add to status updates history if note is provided
+    if (note) {
+      order.statusUpdates.push({
+        status: `sub_order_${status}`,
+        timestamp: Date.now(),
+        note: note,
+        subOrderId: subOrderId,
+      });
+    }
+
+    await order.save();
+
+    // Notify customer about status update
+    await notificationService
+      .sendNotification(
+        order.customerId,
+        "sub_order_status_update",
+        `Your item "${order.items[subOrderIndex].name}" is now ${status}`,
+        { orderId: order._id, subOrderId: subOrderId, status }
+      )
+      .catch((err) => console.error("Notification service error:", err));
+
+    res.status(200).json({
+      message: "Sub-order status updated successfully",
+      order,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Export all controller functions
+module.exports = {
+  createOrder,
+  getOrderWithSubOrders,
+  getCustomerOrders,
+  getRestaurantOrders,
+  updateOrderStatus,
+  getDeliveryPersonOrders,
+  getDeliveryOrder,
+  updateOrderPaymentStatus,
+  updateSubOrderStatus,
+};
+
+
+/* File: ./server\order-service\models\Cart.js */
+const mongoose = require("mongoose");
+
+const cartItemSchema = new mongoose.Schema({
+  restaurantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: "Restaurant",
+  },
+  menuItemId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+  },
+  name: {
+    type: String,
+    required: true,
+  },
+  price: {
+    type: Number,
+    required: true,
+  },
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1,
+  },
+});
+
+const cartSchema = new mongoose.Schema({
+  customerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: "User",
+    unique: true,
+  },
+  items: [cartItemSchema],
+  updatedAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+cartSchema.pre("save", function (next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+module.exports = mongoose.model("Cart", cartSchema);
+
+
+/* File: ./server\order-service\models\Order.js */
+const mongoose = require("mongoose");
+
+const orderItemSchema = new mongoose.Schema({
+  restaurantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: "Restaurant",
+  },
+  menuItemId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+  },
+  name: {
+    type: String,
+    required: true,
+  },
+  price: {
+    type: Number,
+    required: true,
+  },
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1,
+  },
+  status: {
+    type: String,
+    enum: [
+      "pending",
+      "confirmed",
+      "preparing",
+      "ready",
+      "picked_up",
+      "delivered",
+      "cancelled",
+    ],
+    default: "pending",
+  },
+});
+
+const orderSchema = new mongoose.Schema({
+  customerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: "User",
+  },
+  restaurantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: "Restaurant",
+  },
+  customerInfo: {
+    name: {
+      type: String,
+      required: true,
+    },
+    phone: {
+      type: String,
+      required: true,
+    },
+  },
+  items: [orderItemSchema],
+  deliveryAddress: {
+    type: String,
+    required: true,
+  },
+  deliveryLocation: {
+    type: {
+      type: String,
+      default: "Point",
+    },
+    coordinates: [Number], // [longitude, latitude]
+  },
+  deliveryPersonId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
+  totalAmount: {
+    type: Number,
+    required: true,
+  },
+  paymentStatus: {
+    type: String,
+    enum: ["pending", "completed", "failed", "refunded"],
+    default: "pending",
+  },
+  paymentId: {
+    type: String,
+  },
+  trackingStatus: {
+    type: String,
+    enum: [
+      "placed",
+      "confirmed",
+      "preparing",
+      "ready_for_pickup",
+      "out_for_delivery",
+      "delivered",
+      "cancelled",
+    ],
+    default: "placed",
+  },
+  statusUpdates: [
+    {
+      status: String,
+      timestamp: {
+        type: Date,
+        default: Date.now,
+      },
+      note: String,
+    },
+  ],
+  estimatedDeliveryTime: {
+    preparationTime: Number,
+    travelTime: Number,
+    totalEstimatedTime: Number,
+    estimatedDeliveryAt: Date,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+orderSchema.pre("save", function (next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+module.exports = mongoose.model("Order", orderSchema);
+
+
+/* File: ./server\order-service\routes\cartRoutes.js */
+const express = require("express");
+const router = express.Router();
+const {
+  getCart,
+  addToCart,
+  updateCartItem,
+  removeFromCart,
+  clearCart,
+  checkoutCart,
+  checkoutRestaurant,
+} = require("../controllers/cartController");
+const authMiddleware = require("../utils/authMiddleware");
+
+// All cart routes require customer authentication
+router.use(authMiddleware(["customer"]));
+
+// Cart routes
+router.get("/", getCart);
+router.post("/items", addToCart);
+router.patch("/items", updateCartItem);
+router.delete("/items/:itemId", removeFromCart);
+router.delete("/", clearCart);
+router.post("/checkout", checkoutRestaurant);
+
+module.exports = router;
+
+
+/* File: ./server\order-service\routes\orderRoutes.js */
+const express = require("express");
+const router = express.Router();
+const {
+  createOrder,
+  getOrderWithSubOrders,
+  updateSubOrderStatus,
+  getCustomerOrders,
+  getRestaurantOrders,
+  updateOrderStatus,
+  getDeliveryPersonOrders,
+  getDeliveryOrder,
+  updateOrderPaymentStatus,
+} = require("../controllers/orderController");
+const authMiddleware = require("../utils/authMiddleware");
+
+// Customer routes
+router.post("/", authMiddleware(["customer"]), createOrder);
+router.get(
+  "/customer/:customerId",
+  authMiddleware(["customer"]),
+  getCustomerOrders
+);
+router.get(
+  "/:id",
+  authMiddleware(["customer", "restaurant_admin", "delivery_personnel"]),
+  getOrderWithSubOrders
+);
+
+// Restaurant admin routes
+router.patch(
+  "/:id/suborders",
+  authMiddleware(["restaurant_admin"]),
+  updateSubOrderStatus
+);
+router.get(
+  "/restaurant/:restaurantId",
+  authMiddleware(["restaurant_admin"]),
+  getRestaurantOrders
+);
+
+// Order tracking routes
+router.patch(
+  "/:orderId/status",
+  authMiddleware(["restaurant_admin", "delivery_personnel"]),
+  updateOrderStatus
+);
+
+// Delivery personnel routes
+router.patch(
+  "/suborders/:subOrderId/status",
+  authMiddleware(["delivery_personnel"]),
+  updateSubOrderStatus
+);
+
+router.get(
+  "/delivery/assigned",
+  authMiddleware(["delivery_personnel"]),
+  getDeliveryPersonOrders
+);
+
+router.get(
+  "/delivery/order/:id",
+  authMiddleware(["delivery_personnel"]),
+  getDeliveryOrder
+);
+
+router.post(
+  "/:orderId/payment-update",
+  authMiddleware(["internal_service"]),
+  updateOrderPaymentStatus
+);
+
+module.exports = router;
+
+
+/* File: ./server\order-service\services\estimationService.js */
+const axios = require("axios");
+const { RESTAURANT_SERVICE_URL } = process.env;
+
+module.exports = {
+  calculateEstimatedTime: async (items, deliveryLocation, restaurantIds) => {
+    // 1. Calculate preparation time (10 mins per item)
+    const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
+    const preparationTime = totalItems * 10; // in minutes
+
+    // 2. Get restaurant locations from restaurant service
+    const restaurantLocations = await Promise.all(
+      restaurantIds.map((id) =>
+        axios
+          .get(`${RESTAURANT_SERVICE_URL}/api/restaurants/${id}`)
+          .then((res) => res.data.address.geoCoordinates)
+      )
+    );
+
+    // 3. Calculate average distance (simple straight-line calculation)
+    const distances = restaurantLocations.map((coords) => {
+      const [restaurantLong, restaurantLat] = coords.coordinates;
+      const [deliveryLong, deliveryLat] = deliveryLocation.coordinates;
+
+      // Haversine formula for distance calculation
+      const R = 6371; // Earth's radius in km
+      const dLat = ((deliveryLat - restaurantLat) * Math.PI) / 180;
+      const dLon = ((deliveryLong - restaurantLong) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((restaurantLat * Math.PI) / 180) *
+          Math.cos((deliveryLat * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c; // Distance in km
+    });
+
+    const avgDistance =
+      distances.reduce((sum, dist) => sum + dist, 0) / distances.length;
+
+    // 4. Estimate delivery time (assuming 30 km/h average speed)
+    const travelTimeMinutes = (avgDistance / 30) * 60;
+
+    // 5. Total estimated time
+    return {
+      preparationTime,
+      travelTime: Math.round(travelTimeMinutes),
+      totalEstimatedTime: Math.round(preparationTime + travelTimeMinutes),
+      estimatedDeliveryAt: new Date(
+        Date.now() + (preparationTime + travelTimeMinutes) * 60 * 1000
+      ),
+    };
+  },
+};
+
+
+/* File: ./server\order-service\services\notificationService.js */
+const axios = require("axios");
+require("dotenv").config();
+
+const { NOTIFICATION_SERVICE_URL } = process.env;
+
+module.exports = {
+  sendNotification: async (userId, type, message, metadata) => {
+    try {
+      // Check if notification service URL is defined
+      if (!NOTIFICATION_SERVICE_URL) {
+        console.log(
+          "Notification service URL not defined, skipping notification"
+        );
+        return;
+      }
+
+      await axios.post(`${NOTIFICATION_SERVICE_URL}/api/notifications`, {
+        userId,
+        type,
+        message,
+        metadata,
+      });
+    } catch (error) {
+      console.error("Error sending notification:", error.message);
+      // Fail silently as notification is not critical
+    }
+  },
+};
+
+
+/* File: ./server\order-service\services\orderSplitter.js */
+const _ = require("lodash");
+
+module.exports = {
+  // Group items by restaurant
+  groupItemsByRestaurant: (items) => {
+    return _.groupBy(items, "restaurantId");
+  },
+
+  // Calculate total amount for items
+  calculateOrderTotal: (items) => {
+    return items.reduce((total, item) => {
+      return total + item.price * item.quantity;
+    }, 0);
+  },
+};
+
+
+/* File: ./server\order-service\services\paymentService.js */
+// order-service/services/paymentService.js
+const axios = require("axios");
+
+const PAYMENT_SERVICE_URL =
+  process.env.PAYMENT_SERVICE_URL || "http://localhost:3001";
+
+// Create a payment for an order
+const createPayment = async (
+  orderId,
+  amount,
+  customerId,
+  description,
+  token
+) => {
+  try {
+    console.log("Creating payment with token:", token); // Debug log
+    const response = await axios.post(
+      `${PAYMENT_SERVICE_URL}/api/payments`,
+      {
+        orderId,
+        amount,
+        customerId,
+        description,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error("Error creating payment:", error);
+    throw error;
+  }
+};
+
+// Update order with payment status
+const updateOrderPaymentStatus = async (orderId, paymentStatus) => {
+  try {
+    // Find the order
+    const order = await Order.findById(orderId);
+
+    if (!order) {
+      throw new Error(`Order not found: ${orderId}`);
+    }
+
+    // Update payment status
+    order.paymentStatus = paymentStatus;
+
+    // If payment is successful, update order status accordingly
+    if (paymentStatus === "SUCCESSFUL") {
+      order.status = "CONFIRMED";
+
+      // Notify restaurants about confirmed order
+      for (const subOrder of order.subOrders) {
+        await restaurantService.notifyOrderConfirmation(
+          subOrder.restaurantId,
+          orderId,
+          subOrder._id
+        );
+      }
+
+      // Notify customer about confirmed order
+      await notificationService.sendNotification(
+        order.customerId,
+        "order_confirmed",
+        `Your order #${order._id} has been confirmed and is being prepared`,
+        { orderId: order._id }
+      );
+    } else if (paymentStatus === "FAILED" || paymentStatus === "CANCELED") {
+      order.status = "CANCELLED";
+
+      // Notify customer about cancelled order
+      await notificationService.sendNotification(
+        order.customerId,
+        "order_cancelled",
+        `Your order #${order._id} has been cancelled due to payment issues`,
+        { orderId: order._id }
+      );
+    }
+
+    await order.save();
+
+    return order;
+  } catch (error) {
+    console.error("Error updating order payment status:", error);
+    throw error;
+  }
+};
+
+module.exports = {
+  createPayment,
+  updateOrderPaymentStatus,
+};
+
+
+/* File: ./server\order-service\services\restaurantService.js */
+const axios = require("axios");
+require("dotenv").config();
+
+const { RESTAURANT_SERVICE_URL } = process.env;
+
+module.exports = {
+  getRestaurantAvailability: async (restaurantId) => {
+    try {
+      const response = await axios.get(
+        `${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}/availability`
+      );
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching restaurant availability:", error);
+      throw error;
+    }
+  },
+
+  notifyNewOrder: async (restaurantId, orderData) => {
+    try {
+      await axios.post(
+        `${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}/orders`,
+        orderData
+      );
+    } catch (error) {
+      console.error("Error notifying restaurant about new order:", error);
+      throw error;
+    }
+  },
+
+  getRestaurantDetails: async (restaurantId) => {
+    try {
+      const response = await axios.get(
+        `${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`
+      );
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching restaurant details:", error);
+      throw error;
+    }
+  },
+};
+
+
+/* File: ./server\order-service\services\userService.js */
+const axios = require("axios");
+require("dotenv").config();
+
+const { USER_SERVICE_URL } = process.env;
+
+module.exports = {
+  getUserInfo: async (userId, token) => {
+    try {
+      // Use the correct endpoint
+      const response = await axios.get(`${USER_SERVICE_URL}/api/users/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      return response.data.data.user;
+    } catch (error) {
+      console.error("Error fetching user info:", error);
+      // Implement fallback mechanism
+      try {
+        // Try to get user by ID as fallback
+        const fallbackResponse = await axios.get(
+          `${USER_SERVICE_URL}/api/users/${userId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+        return fallbackResponse.data.data.user;
+      } catch (fallbackError) {
+        console.error("Fallback also failed:", fallbackError);
+        throw error; // Throw the original error
+      }
+    }
+  },
+  verifyDeliveryPerson: async (userId, token) => {
+    try {
+      const response = await axios.get(`${USER_SERVICE_URL}/api/users/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      // Check if the user has the delivery_personnel role
+      return response.data.data.user.role === "delivery_personnel";
+    } catch (error) {
+      console.error("Error verifying delivery person:", error);
+      return false;
+    }
+  },
+};
+
+
+/* File: ./server\order-service\utils\authMiddleware.js */
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+module.exports = (allowedRoles) => {
+  return (req, res, next) => {
+    // First check for internal API key
+    if (req.headers["x-api-key"] === process.env.INTERNAL_API_KEY) {
+      // For internal service calls, create a valid ObjectId instead of "system"
+
+      console.log(req.headers["x-api-key"]);
+      req.user = {
+        id: new mongoose.Types.ObjectId("000000000000000000000000"),
+        role: "internal_service",
+      };
+
+      // Check if internal_service role is allowed
+      if (!allowedRoles.includes("internal_service")) {
+        return res
+          .status(403)
+          .json({ message: "Insufficient permissions for internal service" });
+      }
+
+      return next();
+    }
+
+    // If no internal API key, proceed with JWT authentication
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      req.user = decoded;
+
+      if (!allowedRoles.includes(decoded.role)) {
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+
+      next();
+    } catch (error) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+  };
+};
+
+
+/* File: ./server\order-service\utils\errorHandler.js */
+module.exports = (err, req, res, next) => {
+  console.error(err.stack);
+
+  if (err.name === "ValidationError") {
+    return res.status(400).json({
+      message: "Validation error",
+      details: err.message,
+    });
+  }
+
+  if (err.isAxiosError) {
+    return res.status(502).json({
+      message: "Error communicating with dependent service",
+      details: err.message,
+    });
+  }
+
+  res.status(500).json({ message: "Something went wrong" });
+};
+
+
+/* File: ./server\payment-service\server.js */
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const morgan = require("morgan");
+const connectDB = require("./config/db");
+const paymentRoutes = require("./routes/paymentRoutes");
+const errorHandler = require("./utils/errorHandler");
+require("dotenv").config();
+
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // For parsing application/x-www-form-urlencoded
+app.use(morgan("dev"));
+
+// Database connection
+connectDB();
+
+// Routes
+app.use("/api/payments", paymentRoutes);
+
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "OK", timestamp: new Date() });
+});
+
+// Error handling middleware
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 3003;
+app.listen(PORT, () => {
+  console.log(`Payment service running on port ${PORT}`);
+});
+
+module.exports = app;
+
+
+/* File: ./server\payment-service\config\db.js */
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log("MongoDB connected successfully");
+  } catch (error) {
+    console.error("MongoDB connection error:", error);
+    process.exit(1);
+  }
+};
+
+module.exports = connectDB;
+
+
+/* File: ./server\payment-service\controllers\paymentController.js */
+const Payment = require("../models/Payment");
+const paymentService = require("../services/paymentService");
+const notificationService = require("../services/notificationService");
+const axios = require("axios");
+require("dotenv").config();
+
+// Create a new payment
+const createPayment = async (req, res, next) => {
+  try {
+    const { orderId, amount, customerId, description } = req.body;
+
+    // Validate required fields
+    if (!orderId || !amount || !customerId) {
+      return res.status(400).json({
+        message: "Missing required fields",
+        required: ["orderId", "amount", "customerId"],
+      });
+    }
+
+    // Check if payment already exists for this order
+    const existingPayment = await Payment.findOne({ orderId });
+    if (existingPayment) {
+      return res.status(400).json({
+        message: "Payment already exists for this order",
+        paymentId: existingPayment._id,
+      });
+    }
+
+    // Fetch customer info from user service using the user's token
+    let customerInfo;
+    try {
+      // Extract the token part from the Authorization header
+      const authHeader = req.headers.authorization;
+      const token =
+        authHeader &&
+        typeof authHeader === "string" &&
+        authHeader.startsWith("Bearer ")
+          ? authHeader.split(" ")[1]
+          : null;
+
+      if (!token) {
+        throw new Error("No valid authorization token provided");
+      }
+
+      // Use the /me endpoint with the user's token
+      const response = await axios.get(
+        `${process.env.USER_SERVICE_URL}/api/users/me`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      customerInfo = response.data.data.user;
+    } catch (error) {
+      console.error("Error fetching customer info:", error);
+      // Use fallback data instead of failing
+      customerInfo = {
+        name: "Customer",
+        phone: "Unknown",
+      };
+    }
+
+    // Convert description to string if it's an object
+    const descriptionStr =
+      typeof description === "object"
+        ? JSON.stringify(description)
+        : description || `Payment for order #${orderId}`;
+
+    // Create payment record (without items field)
+    const payment = new Payment({
+      orderId,
+      customerId,
+      amount,
+      currency: req.body.currency || "LKR",
+      description: descriptionStr,
+    });
+
+    const savedPayment = await payment.save();
+
+    // Generate payment parameters
+    const paymentParams = paymentService.generatePaymentParams(
+      orderId,
+      amount,
+      payment.currency,
+      `Order #${orderId}`, // Simple description instead of items array
+      customerId,
+      customerInfo
+    );
+
+    // Generate payment URL
+    const paymentUrl = paymentService.getPaymentUrl(paymentParams);
+
+    res.status(201).json({
+      paymentId: savedPayment._id,
+      checkoutUrl: paymentUrl,
+      paymentParams: paymentParams,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Process payment notification from PayHere
+const processNotification = async (req, res, next) => {
+  try {
+    const {
+      merchant_id,
+      order_id,
+      payment_id,
+      payhere_amount,
+      payhere_currency,
+      status_code,
+      md5sig,
+      method,
+    } = req.body;
+
+    console.log("Payment notification received:", {
+      order_id,
+      payment_id,
+      status_code,
+    });
+
+    // Verify the signature
+    const isValidSignature = paymentService.verifyPaymentSignature(
+      merchant_id,
+      order_id,
+      payhere_amount,
+      payhere_currency,
+      status_code,
+      md5sig
+    );
+
+    if (!isValidSignature) {
+      console.error("Invalid payment signature for order:", order_id);
+      return res.status(400).json({ message: "Invalid payment signature" });
+    }
+
+    // Find the payment
+    const payment = await Payment.findOne({ orderId: order_id });
+    if (!payment) {
+      console.error("Payment not found for order:", order_id);
+      return res.status(404).json({ message: "Payment not found" });
+    }
+
+    // Update payment status based on status code
+    let paymentStatus;
+    switch (status_code) {
+      case "2":
+        paymentStatus = "completed";
+        break;
+      case "0":
+        paymentStatus = "pending";
+        break;
+      case "-1":
+        paymentStatus = "cancelled";
+        break;
+      case "-2":
+        paymentStatus = "failed";
+        break;
+      case "-3":
+        paymentStatus = "chargedback";
+        break;
+      default:
+        paymentStatus = "pending";
+    }
+
+    // Update payment record
+    payment.status = paymentStatus;
+    payment.paymentId = payment_id;
+    payment.paymentMethod = method;
+    payment.statusCode = status_code;
+    payment.md5sig = md5sig;
+    await payment.save();
+
+    // Notify order service about payment status
+    await notificationService.notifyOrderService(
+      order_id,
+      paymentStatus,
+      payment_id
+    );
+
+    // Respond to PayHere
+    res.status(200).send("Payment notification received");
+  } catch (error) {
+    console.error("Error processing payment notification:", error);
+    next(error);
+  }
+};
+
+// Get payment by ID
+const getPaymentById = async (req, res, next) => {
+  try {
+    const payment = await Payment.findById(req.params.id);
+    if (!payment) {
+      return res.status(404).json({ message: "Payment not found" });
+    }
+    res.status(200).json(payment);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get payment by order ID
+const getPaymentByOrderId = async (req, res, next) => {
+  try {
+    const payment = await Payment.findOne({ orderId: req.params.orderId });
+    if (!payment) {
+      return res.status(404).json({ message: "Payment not found" });
+    }
+    res.status(200).json(payment);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get payments by customer ID
+const getPaymentsByCustomerId = async (req, res, next) => {
+  try {
+    const payments = await Payment.find({ customerId: req.params.customerId });
+    res.status(200).json(payments);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Process refund
+const processRefund = async (req, res, next) => {
+  try {
+    const { paymentId, amount, reason } = req.body;
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ message: "Payment not found" });
+    }
+
+    if (payment.status !== "completed") {
+      return res
+        .status(400)
+        .json({ message: "Only completed payments can be refunded" });
+    }
+
+    // In a real implementation, you would call PayHere's refund API here
+    // For sandbox, we'll just update the status
+    payment.status = "refunded";
+    await payment.save();
+
+    // Notify order service about refund
+    await notificationService.notifyOrderService(
+      payment.orderId,
+      "refunded",
+      payment.paymentId
+    );
+
+    res.status(200).json({ message: "Refund processed successfully", payment });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = {
+  createPayment,
+  processNotification,
+  getPaymentById,
+  getPaymentByOrderId,
+  getPaymentsByCustomerId,
+  processRefund,
+};
+
+
+/* File: ./server\payment-service\models\Payment.js */
+const mongoose = require("mongoose");
+
+const paymentSchema = new mongoose.Schema({
+  orderId: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  customerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: "User",
+  },
+  amount: {
+    type: Number,
+    required: true,
+  },
+  currency: {
+    type: String,
+    required: true,
+    default: "LKR",
+    enum: ["LKR"],
+  },
+  status: {
+    type: String,
+    enum: [
+      "pending",
+      "completed",
+      "failed",
+      "refunded",
+      "cancelled",
+      "chargedback",
+    ],
+    default: "pending",
+  },
+  paymentId: {
+    type: String,
+  },
+  paymentMethod: {
+    type: String,
+  },
+  statusCode: {
+    type: String,
+  },
+  description: {
+    type: String,
+  },
+  hash: {
+    type: String,
+  },
+  md5sig: {
+    type: String,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+paymentSchema.pre("save", function (next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+module.exports = mongoose.model("Payment", paymentSchema);
+
+
+/* File: ./server\payment-service\routes\paymentRoutes.js */
+const express = require("express");
+const router = express.Router();
+const {
+  createPayment,
+  processNotification,
+  getPaymentById,
+  getPaymentByOrderId,
+  getPaymentsByCustomerId,
+  processRefund,
+} = require("../controllers/paymentController");
+const authMiddleware = require("../utils/authMiddleware");
+
+// Create a new payment (internal service call)
+router.post(
+  "/",
+  authMiddleware(["customer", "restaurant_admin", "admin", "internal_service"]),
+  createPayment
+);
+
+// Process payment notification from PayHere (no auth - public endpoint)
+router.post("/notify", processNotification);
+
+// Get payment by ID
+router.get(
+  "/:id",
+  authMiddleware(["customer", "restaurant_admin", "admin", "internal_service"]),
+  getPaymentById
+);
+
+// Get payment by order ID
+router.get(
+  "/order/:orderId",
+  authMiddleware(["customer", "restaurant_admin", "admin", "internal_service"]),
+  getPaymentByOrderId
+);
+
+// Get payments by customer ID
+router.get(
+  "/customer/:customerId",
+  authMiddleware(["customer", "admin", "internal_service"]),
+  getPaymentsByCustomerId
+);
+
+// Process refund
+router.post(
+  "/refund",
+  authMiddleware(["admin", "restaurant_admin", "internal_service"]),
+  processRefund
+);
+
+module.exports = router;
+
+
+/* File: ./server\payment-service\services\notificationService.js */
+// Update ./server/payment-service/services/notificationService.js
+const axios = require("axios");
+require("dotenv").config();
+
+const { ORDER_SERVICE_URL } = process.env;
+
+module.exports = {
+  notifyOrderService: async (orderId, paymentStatus, paymentId) => {
+    try {
+      // Add error handling for missing ORDER_SERVICE_URL
+      if (!ORDER_SERVICE_URL) {
+        console.error("ORDER_SERVICE_URL not defined in environment variables");
+        return false;
+      }
+
+      // Use x-api-key instead of Bearer token for internal service communication
+      await axios.post(
+        `${ORDER_SERVICE_URL}/api/orders/${orderId}/payment-update`,
+        {
+          paymentStatus,
+          paymentId,
+        },
+        {
+          headers: {
+            "x-api-key": process.env.INTERNAL_API_KEY,
+          },
+        }
+      );
+      console.log(
+        `Order service notified about payment ${paymentStatus} for order ${orderId}`
+      );
+      return true;
+    } catch (error) {
+      console.error(
+        `Error notifying order service about payment ${paymentStatus}:`,
+        error.message
+      );
+      // Don't fail the whole process if notification fails
+      return false;
+    }
+  },
+};
+
+
+/* File: ./server\payment-service\services\paymentService.js */
+const crypto = require("crypto");
+require("dotenv").config();
+
+const MERCHANT_ID = process.env.PAYHERE_MERCHANT_ID;
+const MERCHANT_SECRET = process.env.PAYHERE_MERCHANT_SECRET;
+const PAYHERE_URL =
+  process.env.NODE_ENV === "production"
+    ? "https://www.payhere.lk/pay/checkout"
+    : "https://sandbox.payhere.lk/pay/checkout";
+
+const generateHash = (orderId, amount, currency) => {
+  // Convert amount to string with 2 decimal places
+  const amountStr = parseFloat(amount).toFixed(2);
+
+  // Generate hash as per PayHere documentation
+  return crypto
+    .createHash("md5")
+    .update(
+      MERCHANT_ID +
+        orderId +
+        amountStr +
+        currency +
+        crypto
+          .createHash("md5")
+          .update(MERCHANT_SECRET)
+          .digest("hex")
+          .toUpperCase()
+    )
+    .digest("hex")
+    .toUpperCase();
+};
+
+const verifyPaymentSignature = (
+  merchantId,
+  orderId,
+  amount,
+  currency,
+  statusCode,
+  receivedMd5sig
+) => {
+  try {
+    // Convert amount to string with 2 decimal places
+    const amountStr = parseFloat(amount).toFixed(2);
+
+    // Generate local md5sig for verification
+    const localMd5sig = crypto
+      .createHash("md5")
+      .update(
+        merchantId +
+          orderId +
+          amountStr +
+          currency +
+          statusCode +
+          crypto
+            .createHash("md5")
+            .update(MERCHANT_SECRET)
+            .digest("hex")
+            .toUpperCase()
+      )
+      .digest("hex")
+      .toUpperCase();
+
+    // Compare local signature with received signature
+    return localMd5sig === receivedMd5sig;
+  } catch (error) {
+    console.error("Error verifying payment signature:", error);
+    return false;
+  }
+};
+
+const generatePaymentParams = (
+  orderId,
+  amount,
+  currency,
+  customerId,
+  customerInfo
+) => {
+  // Generate hash
+  const hash = generateHash(orderId, amount, currency);
+
+  // Prepare payment parameters
+  return {
+    merchant_id: MERCHANT_ID,
+    return_url: process.env.PAYHERE_RETURN_URL,
+    cancel_url: process.env.PAYHERE_CANCEL_URL,
+    notify_url: process.env.PAYHERE_NOTIFY_URL,
+    order_id: orderId,
+    currency: currency,
+    amount: parseFloat(amount).toFixed(2),
+    first_name:
+      customerInfo?.firstName ||
+      customerInfo?.name?.split(" ")[0] ||
+      "Customer",
+    last_name:
+      customerInfo?.lastName ||
+      customerInfo?.name?.split(" ").slice(1).join(" ") ||
+      "",
+    email: customerInfo?.email || "customer@example.com",
+    phone: customerInfo?.phone || "0000000000",
+    address: customerInfo?.address || "N/A",
+    city: customerInfo?.city || "Colombo",
+    country: customerInfo?.country || "Sri Lanka",
+    hash: hash,
+  };
+};
+
+const getPaymentUrl = (params) => {
+  // Convert params to URL query string
+  const queryString = Object.entries(params)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join("&");
+
+  return `${PAYHERE_URL}?${queryString}`;
+};
+
+module.exports = {
+  generateHash,
+  verifyPaymentSignature,
+  generatePaymentParams,
+  getPaymentUrl,
+  MERCHANT_ID,
+  PAYHERE_URL,
+};
+
+
+/* File: ./server\payment-service\utils\authMiddleware.js */
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+module.exports = (allowedRoles) => {
+  return (req, res, next) => {
+    // First check for internal API key
+    if (req.headers["x-api-key"] === process.env.INTERNAL_API_KEY) {
+      // For internal service calls, create a valid ObjectId instead of "system"
+
+      console.log(req.headers["x-api-key"]);
+      req.user = {
+        id: new mongoose.Types.ObjectId("000000000000000000000000"),
+        role: "internal_service",
+      };
+
+      // Check if internal_service role is allowed
+      if (!allowedRoles.includes("internal_service")) {
+        return res
+          .status(403)
+          .json({ message: "Insufficient permissions for internal service" });
+      }
+
+      return next();
+    }
+
+    // If no internal API key, proceed with JWT authentication
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      req.user = decoded;
+
+      if (!allowedRoles.includes(decoded.role)) {
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+
+      next();
+    } catch (error) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+  };
+};
+
+
+/* File: ./server\payment-service\utils\errorHandler.js */
+module.exports = (err, req, res, next) => {
+  console.error(err.stack);
+
+  if (err.name === "ValidationError") {
+    return res.status(400).json({
+      message: "Validation error",
+      details: err.message,
+    });
+  }
+
+  if (err.isAxiosError) {
+    return res.status(502).json({
+      message: "Error communicating with dependent service",
+      details: err.message,
+    });
+  }
+
+  res.status(500).json({ message: "Something went wrong" });
+};
+
+
+/* File: ./server\restaurant-service\server.js */
+const express = require("express");
+const mongoose = require("mongoose");
+const dotenv = require("dotenv");
+const restaurantRoutes = require("./routes/restaurantRoutes");
+const rateLimiter = require("./utils/rateLimiter");
+const errorHandler = require("./utils/errorHandler");
+const cors = require("cors");
+const http = require("http"); // Import HTTP to create server
+const socketIo = require("socket.io"); // Import socket.io for WebSocket
+
+dotenv.config(); // Load environment variables
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Create HTTP server for Express app and Socket.IO
+const httpServer = http.createServer(app);
+
+// Initialize Socket.IO with the HTTP server
+const io = socketIo(httpServer);
+
+// Middleware setup
+app.use(express.json()); // Parse JSON request bodies
+app.use(cors()); // Enable cross-origin requests
+app.use(rateLimiter); // Apply rate limiting
+
+// Routes
+app.use("/api/restaurants", restaurantRoutes);
+
+// MongoDB Connection
+mongoose
+  .connect(process.env.DB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    console.log("Connected to MongoDB");
+  })
+  .catch((err) => {
+    console.error("MongoDB connection error:", err);
+  });
+
+// Error handling middleware
+app.use(errorHandler);
+
+// Real-time communication with Socket.IO
+io.on("connection", (socket) => {
+  console.log("A user connected");
+  socket.on("disconnect", () => {
+    console.log("A user disconnected");
+  });
+});
+
+// Start the server and listen for incoming requests
+httpServer.listen(PORT, () => {
+  console.log(`Restaurant Service running on port ${PORT}`);
+});
+
+
+/* File: ./server\restaurant-service\config\dbConfig.js */
+const mongoose = require('mongoose');
+
+const connectDB = () => {
+  mongoose.connect(process.env.DB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  }).then(() => {
+    console.log('MongoDB Connected');
+  }).catch((err) => {
+    console.error('DB Connection Failed', err);
+  });
+};
+
+module.exports = connectDB;
+
+/* File: ./server\restaurant-service\config\multerConfig.js */
+const multer = require('multer');
+const path = require('path');
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    const { name, menu } = req.body;
+    
+    try {
+      // Parse menu if it's a string (from form-data)
+      const parsedMenu = typeof menu === 'string' ? JSON.parse(menu) : (menu || []);
+      
+      if (file.fieldname === 'coverImage') {
+        // Handle cover image filename
+        const cleanName = name ? name.replace(/\s+/g, '_').toLowerCase() : 'restaurant';
+        cb(null, `${cleanName}_cover_${Date.now()}${path.extname(file.originalname)}`);
+      } 
+      else if (file.fieldname === 'menuItemImages') {
+        // Handle menu item images
+        const index = req.files['menuItemImages']?.indexOf(file) || 0;
+        const itemName = parsedMenu[index]?.name || `item_${index}`;
+        cb(null, `${itemName.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}${path.extname(file.originalname)}`);
+      } 
+      else {
+        // Default filename
+        cb(null, `${Date.now()}${path.extname(file.originalname)}`);
+      }
+    } catch (err) {
+      console.error('Error generating filename:', err);
+      cb(null, `${Date.now()}${path.extname(file.originalname)}`);
+    }
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  const filetypes = /jpeg|jpg|png/;
+  const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = filetypes.test(file.mimetype);
+
+  if (extname && mimetype) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only jpg, jpeg, and png are allowed.'));
+  }
+};
+
+const upload = multer({ 
+  storage, 
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
+
+module.exports = upload;
+
+/* File: ./server\restaurant-service\controllers\restaurantController.js */
+const axios = require("axios");
+const Restaurant = require("../models/restaurantModel");
+const { calculateDistance } = require("../utils/geolocation");
+const upload = require("../config/multerConfig");
+
+const addRestaurant = async (req, res) => {
+  console.log("Request body:", req.body); // Debugging log
+  console.log("Request files:", req.files); // Debugging log
+
+  try {
+    // Parse the incoming data (handling both stringified and direct objects)
+    const name = req.body.name;
+    const description = req.body.description;
+
+    const address =
+      typeof req.body.address === "string"
+        ? JSON.parse(req.body.address)
+        : req.body.address;
+
+    const operatingHours =
+      typeof req.body.operatingHours === "string"
+        ? JSON.parse(req.body.operatingHours)
+        : req.body.operatingHours;
+
+    let menu = [];
+    try {
+      menu =
+        typeof req.body.menu === "string"
+          ? JSON.parse(req.body.menu)
+          : req.body.menu || [];
+
+      if (!Array.isArray(menu)) {
+        throw new Error("Menu must be an array");
+      }
+    } catch (err) {
+      console.error("Error parsing menu:", err);
+      return res.status(400).json({ message: "Invalid menu format" });
+    }
+
+    // Validate required fields
+    if (!name || !address) {
+      return res.status(400).json({
+        message: "Name and address are required",
+        details: {
+          received: { name, address },
+        },
+      });
+    }
+
+    // Validate address structure
+    if (
+      !address.geoCoordinates ||
+      typeof address.geoCoordinates !== "object" ||
+      isNaN(parseFloat(address.geoCoordinates.longitude)) ||
+      isNaN(parseFloat(address.geoCoordinates.latitude))
+    ) {
+      return res.status(400).json({
+        message: "Valid geo coordinates are required",
+        details: {
+          receivedCoordinates: address.geoCoordinates,
+        },
+      });
+    }
+
+    // Check if restaurant already exists
+    const existingRestaurant = await Restaurant.findOne({ name });
+    if (existingRestaurant) {
+      return res.status(400).json({
+        message: "Restaurant already exists",
+        existingId: existingRestaurant._id,
+      });
+    }
+
+    // Handle file uploads
+    const coverImage = req.files?.coverImage?.[0]?.path || null;
+    const menuItemImages = req.files?.menuItemImages || [];
+
+    // Validate menu items match uploaded images
+    if (menuItemImages.length > 0 && menuItemImages.length !== menu.length) {
+      console.warn(
+        `Mismatch: ${menuItemImages.length} images for ${menu.length} menu items`
+      );
+    }
+
+    // Create new restaurant with proper data types
+    const newRestaurant = new Restaurant({
+      name: name.trim(),
+      description: description ? description.trim() : "",
+      address: {
+        street: address.street ? address.street.trim() : "",
+        city: address.city ? address.city.trim() : "",
+        country: address.country ? address.country.trim() : "",
+        geoCoordinates: {
+          type: "Point",
+          coordinates: [
+            parseFloat(address.geoCoordinates.longitude),
+            parseFloat(address.geoCoordinates.latitude),
+          ],
+        },
+      },
+      menu: menu.map((item, index) => ({
+        name: item.name ? item.name.trim() : `Item ${index + 1}`,
+        description: item.description ? item.description.trim() : "",
+        price: parseFloat(item.price) || 0,
+        category: item.category ? item.category.trim() : "other",
+        image: menuItemImages[index]?.path || null,
+      })),
+      operatingHours: {
+        from: operatingHours?.from || "09:00",
+        to: operatingHours?.to || "21:00",
+      },
+      availability: true,
+      coverImage,
+    });
+
+    // Validate the restaurant document before saving
+    const validationError = newRestaurant.validateSync();
+    if (validationError) {
+      return res.status(400).json({
+        message: "Validation failed",
+        error: validationError.message,
+        details: validationError.errors,
+      });
+    }
+
+    await newRestaurant.save();
+
+    res.status(201).json({
+      status: "success",
+      data: {
+        restaurant: newRestaurant,
+      },
+    });
+  } catch (err) {
+    console.error("Error creating restaurant:", err);
+
+    // Handle duplicate key errors separately
+    if (err.code === 11000) {
+      return res.status(400).json({
+        message: "Restaurant with this name already exists",
+        error: err.message,
+      });
+    }
+
+    // Handle validation errors
+    if (err.name === "ValidationError") {
+      return res.status(400).json({
+        message: "Validation failed",
+        error: err.message,
+        details: err.errors,
+      });
+    }
+
+    res.status(500).json({
+      message: "Error creating restaurant",
+      error: err.message,
+      stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+    });
+  }
+};
+
+// Get all restaurants within a certain radius (nearby restaurants)
+const getNearbyRestaurants = async (req, res) => {
+  const { longitude, latitude, radius } = req.query;
+
+  try {
+    // Perform the geospatial query to find nearby restaurants
+    const nearbyRestaurants = await Restaurant.aggregate([
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: [parseFloat(longitude), parseFloat(latitude)],
+          },
+          distanceField: "distance", // Ensure this is added
+          maxDistance: radius * 1000,
+          spherical: true,
+          includeLocs: "address.geoCoordinates", // Include coordinates
+        },
+      },
+      {
+        $project: {
+          name: 1,
+          description: 1,
+          coverImage: 1,
+          menu: 1,
+          availability: 1,
+          operatingHours: 1, // Explicitly include
+          distance: 1, // Include calculated distance
+        },
+      },
+    ]);
+
+    if (nearbyRestaurants.length === 0) {
+      return res.status(404).json({ message: "No nearby restaurants found" });
+    }
+
+    res.status(200).json(nearbyRestaurants);
+  } catch (err) {
+    console.error("Error fetching nearby restaurants:", err);
+    res.status(500).json({ message: "Error fetching nearby restaurants", err });
+  }
+};
+
+// Update restaurant availability
+const toggleAvailability = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const restaurant = await Restaurant.findById(id);
+    if (!restaurant) {
+      console.error("Error fetching restaurant tog:", err);
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    restaurant.availability = !restaurant.availability; // Toggle availability
+    await restaurant.save();
+
+    res
+      .status(200)
+      .json({ message: "Restaurant availability updated", restaurant });
+  } catch (err) {
+    res.status(500).json({ message: "Error updating availability", err });
+  }
+};
+
+// Get restaurant availability status
+const getRestaurantAvailability = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const restaurant = await Restaurant.findById(id);
+
+    if (!restaurant) {
+      console.error("Error fetching restaurant aval:", err);
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    res.status(200).json({
+      restaurantId: restaurant._id,
+      isAvailable: restaurant.availability,
+    });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ message: "Error checking restaurant availability", err });
+  }
+};
+
+// Get restaurant by ID
+const getRestaurantById = async (req, res) => {
+  try {
+    console.log("Fetching restaurant with ID:", req.params.id); // Debugging log
+    const restaurant = await Restaurant.findById(req.params.id);
+    //console.log("Fetched restaurant:", restaurant); // Debugging log
+    if (!restaurant) {
+      console.log("Restaurant not found");
+      return res.status(404).json({ message: "Restaurant not found" });
+      // Debugging log
+    }
+    res.status(200).json(restaurant);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching restaurant", err });
+  }
+};
+
+//get all restaurants
+const getAllRestaurants = async (req, res) => {
+  try {
+    // Fetch all restaurants from the database
+    const restaurants = await Restaurant.find(); // You can add query filters if needed
+
+    if (restaurants.length === 0) {
+      return res.status(404).json({ message: "No restaurants found" });
+    }
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        restaurants, // Return the list of restaurants
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching restaurants:", err);
+    res.status(500).json({ message: "Error fetching restaurants", err });
+  }
+};
+
+// Manage menu items (add/update/remove items with images)
+const manageMenu = async (req, res) => {
+  const { restaurantId, action, menuItemId, menuItem } = req.body;
+
+  // Handle image upload for the menu item
+  const menuItemImage = req.file ? req.file.path : null;
+
+  try {
+    const restaurant = await Restaurant.findById(restaurantId);
+    if (!restaurant) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    // Check if an image needs to be added or updated for the menu item
+    if (menuItemImage) {
+      menuItem.image = menuItemImage;
+    }
+
+    if (action === "add") {
+      restaurant.menu.push(menuItem);
+    } else if (action === "update") {
+      const index = restaurant.menu.findIndex(
+        (item) => item._id.toString() === menuItemId
+      );
+      if (index === -1) {
+        return res.status(404).json({ message: "Menu item not found" });
+      }
+      restaurant.menu[index] = menuItem; // Update the menu item
+    } else if (action === "remove") {
+      restaurant.menu = restaurant.menu.filter(
+        (item) => item._id.toString() !== menuItemId
+      ); // Remove item
+    }
+
+    await restaurant.save();
+    res.status(200).json({ message: "Menu updated", restaurant });
+  } catch (err) {
+    res.status(500).json({ message: "Error managing menu", err });
+  }
+};
+
+// Search restaurants by filters (cuisine, price, rating)
+const searchRestaurants = async (req, res) => {
+  const { cuisine, priceRange, rating } = req.query;
+
+  try {
+    const query = {};
+
+    if (cuisine) query["menu.category"] = cuisine;
+    if (priceRange) query["menu.price"] = { $lte: priceRange };
+    if (rating) query["rating"] = { $gte: rating };
+
+    const restaurants = await Restaurant.find(query);
+    res.status(200).json(restaurants);
+  } catch (err) {
+    res.status(500).json({ message: "Error searching restaurants", err });
+  }
+};
+
+module.exports = {
+  addRestaurant,
+  getNearbyRestaurants,
+  toggleAvailability,
+  getRestaurantAvailability,
+  getRestaurantById,
+  getAllRestaurants,
+  manageMenu,
+  searchRestaurants,
+};
+
+
+/* File: ./server\restaurant-service\middleware\authMiddleware.js */
+// restaurant-service/middleware/authMiddleware.js
+const jwt = require('jsonwebtoken');
+
+const verifyToken = (roles = []) => {
+  return async (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ message: 'No token provided' });
+    }
+
+    try {
+      // Verify token directly (no API call needed)
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      
+      // Attach user info from token
+      req.user = {
+        id: decoded.id,
+        role: decoded.role
+      };
+
+      // Check if user has required role
+      if (roles.length && !roles.includes(decoded.role)) {
+        return res.status(403).json({ message: 'Insufficient permissions' });
+      }
+
+      next();
+    } catch (err) {
+      console.error('Token verification error:', err);
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+  };
+};
+
+module.exports = verifyToken;
+
+/* File: ./server\restaurant-service\models\restaurantModel.js */
+const mongoose = require('mongoose');
+
+const menuItemSchema = new mongoose.Schema({
+  name: String,
+  description: String,
+  price: Number,
+  category: String,
+  image: String, // menu item image
+});
+
+const restaurantSchema = new mongoose.Schema({
+  name: { type: String, required: true, unique: true },
+  description: String,
+  address: {
+    street: String,
+    city: String,
+    country: String,
+    geoCoordinates: {
+      type: { type: String, default: 'Point' },
+      coordinates: [Number], // [longitude, latitude]
+    },
+  },
+  menu: [menuItemSchema],
+  availability: { type: Boolean, default: true },
+  operatingHours: {
+    from: { type: String },
+    to: { type: String },
+  },
+  rating: { type: Number, default: 0 },
+  coverImage: String, // restaurant cover image
+});
+
+restaurantSchema.index({ 'address.geoCoordinates': '2dsphere' });
+
+const Restaurant = mongoose.model('Restaurant', restaurantSchema);
+
+module.exports = Restaurant;
+
+/* File: ./server\restaurant-service\routes\restaurantRoutes.js */
+const express = require("express");
+const router = express.Router();
+const restaurantController = require("../controllers/restaurantController");
+const verifyToken = require("../middleware/authMiddleware");
+const upload = require("../config/multerConfig");
+
+const uploadFields = upload.fields([
+    { name: 'coverImage', maxCount: 1 },
+    { name: 'menuItemImages', maxCount: 10 } // Adjust as needed
+  ]);
+
+// Add a new restaurant should have verifyToken
+router.post('/', 
+    (req, res, next) => {
+        // Log incoming request for debugging
+        console.log('Incoming restaurant data:', req.body);
+        next();
+    },
+    uploadFields, 
+    verifyToken(['admin', 'super_admin']), 
+    restaurantController.addRestaurant
+    );
+
+// Get nearby restaurants
+router.get("/nearby", restaurantController.getNearbyRestaurants);
+
+// get by id
+router.get("/:id", restaurantController.getRestaurantById);
+
+// Update restaurant availability should have verifyToken
+router.put("/:id/availability", restaurantController.toggleAvailability);
+
+router.get("/", restaurantController.getAllRestaurants); // Add this route to get all restaurants
+
+// Get restaurant availability (public)
+router.get("/:id/availability", restaurantController.getRestaurantAvailability);
+
+// Get restaurant details by ID (public)
+router.get("/:id", restaurantController.getRestaurantById);
+
+// Manage menu (add/update/remove items) shoul have verify token
+router.put(
+  "/:id/menu",
+  upload.single("menuItemImage"),
+  verifyToken(['admin', 'restaurant_admin']),
+  restaurantController.manageMenu
+);
+
+// search restaurants
+router.get("/search", restaurantController.searchRestaurants);
+
+module.exports = router;
+
+
+/* File: ./server\restaurant-service\utils\errorHandler.js */
+const errorHandler = (err, req, res, next) => {
+    const statusCode = err.statusCode || 500;
+    const message = err.message || 'Internal Server Error';
+    res.status(statusCode).json({ message });
+  };
+  
+  module.exports = errorHandler;  
+
+/* File: ./server\restaurant-service\utils\geolocation.js */
+const geolib = require('geolib');
+
+// Function to calculate the distance between two geo-coordinates
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  return geolib.getDistance(
+    { latitude: lat1, longitude: lon1 },
+    { latitude: lat2, longitude: lon2 }
+  );
+};
+
+module.exports = { calculateDistance };
+
+/* File: ./server\restaurant-service\utils\rateLimiter.js */
+const rateLimit = require('express-rate-limit');
+
+// Apply a rate limit of 100 requests per 1 minute per IP address
+const rateLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,  // 1 minute
+  max: 100,                 // Limit each IP to 100 requests per windowMs
+  message: "Too many requests, please try again later.", // Custom error message
+});
+
+module.exports = rateLimiter;
+
+/* File: ./server\user-service\server.js */
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const morgan = require("morgan");
+const connectDB = require("./config/db");
+const userRoutes = require("./routes/userRoutes");
+const errorHandler = require("./utils/errorHandler");
+require("dotenv").config();
+
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(morgan("dev"));
+
+// Database connection
+connectDB();
+
+// Update CORS middleware
+app.use(cors());
+
+// Routes
+app.use("/api/users", userRoutes);
+
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "OK", timestamp: new Date() });
+});
+
+// Error handling middleware
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Server running on port 3000");
+});
+
+module.exports = app;
+
+
+/* File: ./server\user-service\config\db.js */
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log("MongoDB connected successfully");
+  } catch (error) {
+    console.error("MongoDB connection error:", error);
+    process.exit(1);
+  }
+};
+
+module.exports = connectDB;
+
+
+/* File: ./server\user-service\controllers\userController.js */
+const User = require("../models/User");
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+const authService = require("../services/authService");
+const { sendEmail } = require("../services/emailService");
+const passwordUtils = require("../utils/passwordUtils");
+const { JWT_SECRET, JWT_EXPIRES_IN } = process.env;
+
+// ==================== TOKEN VERIFICATION ====================
+const verifyToken = async (req, res, next) => {
+  try {
+    // Get token from header
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ message: 'No token provided' });
+    }
+
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    // Get user from database
+    const user = await User.findById(decoded.id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Return user information
+    res.status(200).json({ 
+      status: 'success',
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isActive: user.isActive,
+        // Include any other relevant user info
+      }
+    });
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Token expired' });
+    }
+    next(error);
+  }
+};
+
+// ==================== ADMIN METHODS ====================
+const createAdmin = async (req, res, next) => {
+  try {
+    // Only super admin can create other admins
+    if (req.user.role !== "admin" || !req.user.isSuperAdmin) {
+      return res
+        .status(403)
+        .json({ message: "Not authorized to create admins" });
+    }
+
+    const { name, email, phone, password } = req.body;
+
+    const admin = await User.create({
+      name,
+      email,
+      phone,
+      password: await passwordUtils.hashPassword(password),
+      role: "admin",
+      isActive: true,
+      emailVerified: true,
+      phoneVerified: true,
+    });
+
+    res.status(201).json({
+      status: "success",
+      data: {
+        user: admin,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==================== RESTAURANT ADMIN METHODS ====================
+
+// Create a new Restaurant Admin
+// In your userController.js, enhance the createRestaurantAdmin function
+const createRestaurantAdmin = async (req, res, next) => {
+  try {
+    const { name, email, phone, password, restaurantId } = req.body;
+
+    // Validate restaurant exists (call restaurant service)
+    try {
+      const restaurantResponse = await axios.get(
+        `${process.env.RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`
+      );
+      if (!restaurantResponse.data) {
+        return res.status(404).json({ message: "Restaurant not found" });
+      }
+    } catch (err) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+    if (existingUser) {
+      return res.status(400).json({ message: "Email or phone already in use" });
+    }
+
+    // Create the restaurant admin
+    const restaurantAdmin = await User.create({
+      name,
+      email,
+      phone,
+      password: await passwordUtils.hashPassword(password),
+      role: "restaurant_admin",
+      isActive: true,
+      restaurantId: new mongoose.Types.ObjectId(restaurantId),
+      emailVerified: true,
+      phoneVerified: true,
+    });
+
+    // Send welcome email
+    if (email) {
+      await sendEmail(
+        email,
+        "Welcome as Restaurant Admin",
+        `Hello ${name},\n\nYou have been assigned as the admin for restaurant ${restaurantId}.\n\nYour login credentials:\nEmail: ${email}\nPassword: ${password}`
+      );
+    }
+
+    res.status(201).json({
+      status: "success",
+      data: {
+        user: restaurantAdmin,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Add to userController.js
+const getAdminsByRestaurant = async (req, res, next) => {
+  try {
+    const { restaurantId } = req.params;
+    
+    const admins = await User.find({ 
+      role: 'restaurant_admin',
+      restaurantId: new mongoose.Types.ObjectId(restaurantId)
+    }).select('-password');
+    
+    res.status(200).json({
+      status: "success",
+      data: {
+        admins
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+// const requestRestaurantAdminAccess = async (req, res, next) => {
+//   try {
+//     const { name, email, phone, restaurantName, licenseNumber, address } =
+//       req.body;
+
+//     const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+//     if (existingUser) {
+//       return res.status(400).json({ message: "Email or phone already in use" });
+//     }
+
+//     const restaurantAdmin = await User.create({
+//       name,
+//       email,
+//       phone,
+//       role: "restaurant_admin",
+//       isActive: false,
+//       status: "pending",
+//       phoneVerified: true, // Automatically verify phone without OTP
+//       restaurantDetails: {
+//         name: restaurantName,
+//         licenseNumber,
+//         address,
+//       },
+//     });
+
+//     if (email) {
+//       await sendEmail(
+//         restaurantAdmin.email,
+//         "New restaurant admin request",
+//         `New restaurant admin request from ${restaurantName}`
+//       );
+//     }
+//     // // Notify super admin about new request
+//     // await notificationService.sendAdminNotification(
+//     //   "New restaurant admin request",
+//     //   `New restaurant admin request from ${restaurantName}`
+//     // );
+
+//     res.status(201).json({
+//       status: "success",
+//       message: "Request submitted for approval",
+//       data: {
+//         user: {
+//           _id: restaurantAdmin._id,
+//           name: restaurantAdmin.name,
+//           email: restaurantAdmin.email,
+//         },
+//       },
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// Approve Restaurant Admin
+const approveRestaurantAdmin = async (req, res, next) => {
+  try {
+    const { userId, restaurantId } = req.body;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        isActive: true,
+        status: "approved",
+        restaurantId,
+        password: await passwordUtils.hashPassword(
+          passwordUtils.generateRandomPassword()
+        ),
+      },
+      { new: true }
+    );
+
+    if (email) {
+      await sendEmail(
+        user._id,
+        user.email,
+        "Your restaurant admin account has been approved"
+      );
+    }
+    // Send welcome email with temporary password
+    // await notificationService.sendWelcomeNotification(
+    //   user._id,
+    //   user.email,
+    //   "Your restaurant admin account has been approved"
+    // );
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        user,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==================== CUSTOMER METHODS ====================
+const registerCustomer = async (req, res, next) => {
+  try {
+    const { name, email, phone, password, address } = req.body;
+
+    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+    if (existingUser) {
+      return res.status(400).json({ message: "Email or phone already in use" });
+    }
+
+    const customer = await User.create({
+      name,
+      email,
+      phone,
+      password: await passwordUtils.hashPassword(password),
+      role: "customer",
+      address,
+      isActive: true,
+      phoneVerified: true,
+    });
+
+    // Generate JWT token
+    const token = authService.generateToken(customer._id, customer.role);
+
+    // Send welcome email (no OTP)
+    if (email) {
+      await sendEmail(
+        customer.email,
+        "Welcome to TastyTrail!",
+        `Hello ${customer.name},\n\nThank you for registering at TastyTrail!`
+      );
+    }
+
+    res.status(201).json({
+      status: "success",
+      token,
+      data: {
+        user: {
+          _id: customer._id,
+          name: customer.name,
+          email: customer.email,
+          role: customer.role,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==================== DELIVERY PERSONNEL METHODS ====================
+const registerDeliveryPerson = async (req, res, next) => {
+  try {
+    const { name, phone, nicOrLicense, vehicleType, vehicleNumber } = req.body;
+    const documents = req.files?.map((file) => file.path); // Assuming you're using multer
+
+    const existingUser = await User.findOne({ phone });
+    if (existingUser) {
+      return res.status(400).json({ message: "Phone number already in use" });
+    }
+
+    const deliveryPerson = await User.create({
+      name,
+      phone,
+      role: "delivery_personnel",
+      nicOrLicense,
+      vehicleInfo: {
+        type: vehicleType,
+        number: vehicleNumber,
+      },
+      documents,
+      status: "pending",
+      isActive: false,
+      phoneVerified: true, // Automatically verify phone without OTP
+    });
+
+    // // Notify admin about new delivery person registration
+    // await notificationService.sendAdminNotification(
+    //   "New delivery person registration",
+    //   `New delivery person ${name} registered and pending approval`
+    // );
+
+    res.status(201).json({
+      status: "success",
+      message: "Registration submitted for approval",
+      data: {
+        user: {
+          _id: deliveryPerson._id,
+          name: deliveryPerson.name,
+          phone: deliveryPerson.phone,
+          status: deliveryPerson.status,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const approveDeliveryPerson = async (req, res, next) => {
+  try {
+    const { userId } = req.body;
+
+    const tempPassword = passwordUtils.generateRandomPassword();
+    const deliveryPerson = await User.findByIdAndUpdate(
+      userId,
+      {
+        isActive: true,
+        status: "approved",
+        password: await passwordUtils.hashPassword(tempPassword),
+      },
+      { new: true }
+    );
+
+    // // Send approval notification with temporary password
+    // await notificationService.sendSMSNotification(
+    //   deliveryPerson.phone,
+    //   `Your delivery account has been approved. Temporary password: ${tempPassword}`
+    // );
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        user: deliveryPerson,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==================== COMMON METHODS ====================
+const login = async (req, res, next) => {
+  try {
+    const { email, phone, password } = req.body;
+
+    // Find user by email or phone
+    let user;
+    if (email) {
+      user = await User.findOne({ email }).select("+password");
+    } else if (phone) {
+      user = await User.findOne({ phone }).select("+password");
+    } else {
+      return res.status(400).json({ message: "Email or phone required" });
+    }
+
+    if (
+      !user ||
+      !(await passwordUtils.comparePassword(password, user.password))
+    ) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    // Check if user is active
+    if (!user.isActive) {
+      return res.status(403).json({
+        message: "Account not active",
+        details:
+          user.role === "delivery_personnel"
+            ? "Pending admin approval"
+            : "Account deactivated",
+      });
+    }
+
+    // Role-specific checks
+    if (user.role === "restaurant_admin" && !user.restaurantId) {
+      return res
+        .status(403)
+        .json({ message: "Restaurant admin not assigned to a restaurant" });
+    }
+
+    // Generate JWT token
+    const token = authService.generateToken(user._id, user.role);
+
+    res.status(200).json({
+      status: "success",
+      token,
+      data: {
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Update user profile
+const updateMe = async (req, res, next) => {
+  try {
+    // Filter out unwanted fields
+    const filteredBody = {};
+    const allowedFields = ["name", "email", "phone", "address"];
+    allowedFields.forEach((field) => {
+      if (req.body[field]) filteredBody[field] = req.body[field];
+    });
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user.id,
+      filteredBody,
+      { new: true, runValidators: true }
+    );
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        user: updatedUser,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get all users (admin only)
+const getAllUsers = async (req, res, next) => {
+  try {
+    const users = await User.find();
+    res.status(200).json({
+      status: "success",
+      results: users.length,
+      data: {
+        users,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get user by ID (admin only)
+const getUser = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json({
+      status: "success",
+      data: {
+        user,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get current user profile
+const getMe = async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.user.id)) {
+      return res.status(400).json({ message: "Invalid user ID format" });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    res.status(200).json({ status: "success", data: { user } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Update user (admin only)
+const updateUser = async (req, res, next) => {
+  try {
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json({
+      status: "success",
+      data: {
+        user: updatedUser,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Delete user (admin only)
+const deleteUser = async (req, res, next) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { isActive: false },
+      { new: true }
+    );
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(204).json({
+      status: "success",
+      data: null,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = {
+
+  verifyToken,
+  // Admin methods
+  createAdmin,
+
+  // Restaurant admin methods
+  // requestRestaurantAdminAccess,
+  approveRestaurantAdmin,
+  createRestaurantAdmin,
+  getAdminsByRestaurant,
+
+  // Customer methods
+  registerCustomer,
+
+  // Delivery methods
+  registerDeliveryPerson,
+  approveDeliveryPerson,
+
+  // Common methods
+  login,
+  getMe,
+  updateMe,
+  getAllUsers,
+  getUser,
+  updateUser,
+  deleteUser,
+};
+
+
+/* File: ./server\user-service\models\User.js */
+const mongoose = require("mongoose");
+const validator = require("validator");
+
+const userSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, "Please provide your name"],
+    trim: true,
+  },
+  email: {
+    type: String,
+    required: function () {
+      return this.role !== "delivery_personnel"; // Delivery can register with phone only
+    },
+    unique: true,
+    lowercase: true,
+    validate: [validator.isEmail, "Please provide a valid email"],
+  },
+  phone: {
+    type: String,
+    required: [true, "Please provide your phone number"],
+    unique: true,
+    validate: {
+      validator: function (v) {
+        return /^\+?[\d\s-]{10,}$/.test(v);
+      },
+      message: (props) => `${props.value} is not a valid phone number!`,
+    },
+  },
+  password: {
+    type: String,
+    required: function () {
+      return this.role !== "delivery_personnel"; // Temporary for delivery until approved
+    },
+    minlength: 8,
+    select: false,
+  },
+  role: {
+    type: String,
+    enum: ["customer", "restaurant_admin", "delivery_personnel", "admin"],
+    default: "customer",
+  },
+  address: {
+    type: String,
+    required: function () {
+      return this.role === "customer";
+    },
+  },
+  restaurantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Restaurant",
+    required: function () {
+      return this.role === "restaurant_admin";
+    },
+  },
+  isActive: {
+    type: Boolean,
+    default: false, // Default false for delivery and restaurant admins (needs approval)
+  },
+  status: {
+    type: String,
+    enum: ["pending", "approved", "rejected", "active"],
+    default: function () {
+      if (this.role === "delivery_personnel") return "pending";
+      if (this.role === "restaurant_admin") return "pending";
+      return "active";
+    },
+  },
+  // Delivery personnel specific fields
+  nicOrLicense: {
+    type: String,
+    required: function () {
+      return this.role === "delivery_personnel";
+    },
+  },
+  vehicleInfo: {
+    type: {
+      type: String,
+      enum: ["bike", "car", "scooter", "bicycle"],
+      required: function () {
+        return this.role === "delivery_personnel";
+      },
+    },
+    number: {
+      type: String,
+      required: function () {
+        return this.role === "delivery_personnel";
+      },
+    },
+  },
+  documents: [
+    {
+      type: String, // URLs to uploaded documents
+      required: function () {
+        return this.role === "delivery_personnel";
+      },
+    },
+  ],
+  // Verification fields
+  emailVerified: {
+    type: Boolean,
+    default: false,
+  },
+  phoneVerified: {
+    type: Boolean,
+    default: false,
+  },
+  verificationToken: String,
+  verificationTokenExpires: Date,
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+userSchema.pre("save", function (next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+module.exports = mongoose.model("users", userSchema);
+
+
+/* File: ./server\user-service\routes\userRoutes.js */
+const express = require("express");
+const router = express.Router();
+const upload = require("../utils/multer");
+const {
+  verifyToken,
+  // Admin
+  createAdmin,
+
+  // Restaurant Admin
+  //requestRestaurantAdminAccess,
+  //approveRestaurantAdmin,
+  createRestaurantAdmin,  // <-- Import the new controller for creating restaurant admin
+  getAdminsByRestaurant,
+  
+  // Customer
+  registerCustomer,
+
+  // Delivery
+  registerDeliveryPerson,
+  approveDeliveryPerson,
+
+  // Common
+  login,
+  getMe,
+  updateMe,
+  getAllUsers,
+  getUser,
+  updateUser,
+  deleteUser,
+} = require("../controllers/userController");
+const authMiddleware = require("../utils/authMiddleware");
+
+// ==================== PUBLIC ROUTES ====================
+// Restaurant admin request access
+//router.post("/restaurant-admin/request", requestRestaurantAdminAccess);
+
+// Customer registration
+router.post("/customers/register", registerCustomer);
+
+// Delivery personnel registration
+router.post(
+  "/delivery/register",
+  upload.array("documents", 3),
+  registerDeliveryPerson
+);
+
+// Login (all roles)
+router.post("/login", login);
+
+// ==================== AUTHENTICATED USER ROUTES ====================
+// These routes require any authenticated user (customer, admin, etc.)
+router.use(
+  authMiddleware([
+    "customer",
+    "restaurant_admin",
+    "delivery_personnel",
+    "admin",
+  ])
+);
+
+// Profile management (must come BEFORE any parameterized routes)
+router.get("/me", getMe);
+router.patch("/update-me", updateMe);
+router.get('/verify-token', verifyToken);
+
+// ==================== ADMIN PROTECTED ROUTES ====================
+// These routes require admin role
+router.use(authMiddleware(["admin"]));
+
+// Admin user management
+router.post("/admins", createAdmin);
+//router.patch("/restaurant-admin/approve", approveRestaurantAdmin);
+router.patch("/delivery/approve", approveDeliveryPerson);
+
+// User management
+router.get("/", getAllUsers);
+router.get("/:id", getUser);
+router.patch("/:id", updateUser);
+router.delete("/:id", deleteUser);
+
+// ==================== RESTAURANT ADMIN CREATION ROUTE ====================
+
+// Add these routes
+router.get('/restaurant/:restaurantId/admins', 
+  authMiddleware(['admin']), 
+  getAdminsByRestaurant
+);
+
+router.post('/restaurant-admin', 
+  authMiddleware(['admin']), 
+  createRestaurantAdmin
+);
+
+module.exports = router;
+
+/* File: ./server\user-service\services\authService.js */
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const { JWT_SECRET, JWT_EXPIRES_IN } = process.env;
+
+module.exports = {
+  generateToken: (userId, role) => {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      throw new Error("Invalid user ID for token generation");
+    }
+    return jwt.sign({ id: userId, role }, JWT_SECRET, {
+      expiresIn: JWT_EXPIRES_IN,
+    });
+  },
+
+  verifyToken: (token) => {
+    console.log("[AUTH] Verifying token:", token);
+    if (!token) {
+      throw new Error("No token provided");
+    }
+    return jwt.verify(token, JWT_SECRET);
+  },
+};
+
+
+/* File: ./server\user-service\services\emailService.js */
+// ./server/user-service/services/emailService.js
+const nodemailer = require("nodemailer");
+require("dotenv").config();
+
+async function sendEmail(to, subject, text, html) {
+  // Create a transporter using Gmail SMTP
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.G_USER, // your Gmail address
+      pass: process.env.G_PASS, // your App Password (not Gmail password)
+    },
+  });
+
+  // Send mail with defined transport object
+  let info = await transporter.sendMail({
+    from: `"TastyTrail" <${process.env.G_USER}>`,
+    to,
+    subject,
+    text,
+    html,
+  });
+
+  console.log("Message sent: %s", info.messageId);
+  return info;
+}
+
+module.exports = { sendEmail };
+
+
+/* File: ./server\user-service\services\notificationService.js */
+const nodemailer = require("nodemailer");
+require("dotenv").config();
+
+const { EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, ADMIN_EMAIL } =
+  process.env;
+
+const emailTransporter = nodemailer.createTransport({
+  host: EMAIL_HOST,
+  port: EMAIL_PORT,
+  secure: true,
+  auth: {
+    user: EMAIL_USER,
+    pass: EMAIL_PASS,
+  },
+});
+
+module.exports = {
+  // Email Notifications
+  sendEmailNotification: async (email, subject, message) => {
+    try {
+      await emailTransporter.sendMail({
+        from: `"Food Delivery App" <${EMAIL_USER}>`,
+        to: email,
+        subject,
+        text: message,
+        html: `<p>${message}</p>`,
+      });
+      return true;
+    } catch (error) {
+      console.error("Error sending email:", error);
+      return false;
+    }
+  },
+
+  // Verification Email
+  sendVerificationEmail: async (email, token) => {
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+    const message = `Please verify your email by clicking the link: ${verificationUrl}`;
+
+    return this.sendEmailNotification(
+      email,
+      "Verify Your Email Address",
+      message
+    );
+  },
+
+  // Welcome Notifications
+  sendWelcomeNotification: async (
+    userId,
+    email,
+    message = "Welcome to our platform!"
+  ) => {
+    return this.sendEmailNotification(
+      email,
+      "Welcome to Food Delivery App",
+      message
+    );
+  },
+
+  // Admin Notifications
+  sendAdminNotification: async (subject, message) => {
+    return this.sendEmailNotification(ADMIN_EMAIL, subject, message);
+  },
+
+  // Password Reset
+  sendPasswordResetEmail: async (email, resetToken) => {
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    const message = `You requested a password reset. Click here to reset: ${resetUrl}`;
+
+    return this.sendEmailNotification(email, "Password Reset Request", message);
+  },
+};
+
+
+/* File: ./server\user-service\tests\mailtest.js */
+const nodemailer = require("nodemailer");
+require("dotenv").config();
+
+// Create transporter using Gmail
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.G_USER,
+    pass: process.env.G_PASS,
+  },
+});
+
+// Email options
+const mailOptions = {
+  from: `"Bob from Your Business" <${process.env.G_USER}>`,
+  to: "segroup80@gmail.com",
+  subject: "Welcome! Your free trial is ready.",
+  text: "Hey there! Welcome to Your Business. We're happy to have you!",
+  html: `
+    <p>Hey there!</p>
+    <p>Welcome to Your Business, we're happy to have you here!</p>
+    <p>Your free trial awaits — just log in and get started.</p>
+    <br>
+    <p>Regards,</p>
+    <p>The Your Business Team</p>
+  `,
+};
+
+// Send the email
+transporter.sendMail(mailOptions, (error, info) => {
+  if (error) {
+    console.error("Error sending email:", error);
+  } else {
+    console.log("Email sent successfully:", info.response);
+  }
+});
+
+
+/* File: ./server\user-service\utils\authMiddleware.js */
+const jwt = require("jsonwebtoken");
+const authService = require("../services/authService");
+const User = require("../models/User");
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+module.exports = (allowedRoles) => {
+  return async (req, res, next) => {
+    // 1) Get token from header
+    let token;
+    if (
+      req.headers.authorization &&
+      req.headers.authorization.startsWith("Bearer")
+    ) {
+      token = req.headers.authorization.split(" ")[1];
+    }
+
+    console.log("[DEBUG] Token from header:", req.headers.authorization);
+
+    if (!token) {
+      return res.status(401).json({
+        message: "You are not logged in! Please log in to get access.",
+      });
+    }
+
+    try {
+      // 2) Verify token
+      const decoded = authService.verifyToken(token);
+      console.log("[DEBUG] Decoded Token:", decoded);
+
+      if (!mongoose.Types.ObjectId.isValid(decoded.id)) {
+        return res.status(401).json({ message: "Invalid user ID in token" });
+      }
+
+      // 3) Check if user still exists
+      const currentUser = await User.findById(decoded.id);
+      console.log("[DEBUG] Current User:", currentUser);
+      if (!currentUser) {
+        return res.status(401).json({
+          message: "User no longer exists",
+        });
+      }
+
+      // 4) Check if user role is allowed
+      if (!allowedRoles.includes(decoded.role)) {
+        return res.status(403).json({
+          message: "You do not have permission to perform this action",
+        });
+      }
+
+      // 5) Grant access to protected route
+      req.user = decoded;
+      next();
+    } catch (error) {
+      return res.status(401).json({
+        message: "Invalid token. Please log in again. by AuthMiddleware",
+      });
+    }
+  };
+};
+
+
+/* File: ./server\user-service\utils\errorHandler.js */
+module.exports = (err, req, res, next) => {
+  console.error(err.stack);
+
+  // Mongoose validation error
+  if (err.name === "ValidationError") {
+    const messages = Object.values(err.errors).map((val) => val.message);
+    return res.status(400).json({
+      message: "Validation error",
+      details: messages,
+    });
+  }
+
+  // Mongoose duplicate key error
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyValue)[0];
+    return res.status(400).json({
+      message: "Duplicate field value",
+      details: `${field} already exists`,
+    });
+  }
+
+  if (err.name === "CastError") {
+    return res.status(400).json({
+      message: "Invalid ID format",
+    });
+  }
+
+  // JWT errors
+  if (err.name === "JsonWebTokenError") {
+    return res.status(401).json({
+      message: "Invalid token. Please log in again.",
+    });
+  }
+
+  if (err.name === "TokenExpiredError") {
+    return res.status(401).json({
+      message: "Your token has expired! Please log in again.",
+    });
+  }
+
+  // Default error handling
+  res.status(500).json({
+    message: "Something went wrong",
+  });
+};
+
+
+/* File: ./server\user-service\utils\multer.js */
+const multer = require("multer");
+const path = require("path");
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/documents/");
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(
+      null,
+      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname)
+    );
+  },
+});
+
+const fileFilter = (req, file, cb) => {
+  const filetypes = /jpeg|jpg|png|pdf/;
+  const mimetype = filetypes.test(file.mimetype);
+  const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+
+  if (mimetype && extname) {
+    return cb(null, true);
+  }
+  cb(new Error("Only images (JPEG, JPG, PNG) and PDFs are allowed"));
+};
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: fileFilter,
+});
+
+module.exports = upload;
+
+
+/* File: ./server\user-service\utils\passwordUtils.js */
+const bcrypt = require("bcryptjs");
+
+module.exports = {
+  hashPassword: async (password) => {
+    return await bcrypt.hash(password, 12);
+  },
+
+  comparePassword: async (candidatePassword, userPassword) => {
+    return await bcrypt.compare(candidatePassword, userPassword);
+  },
+
+  generateRandomPassword: () => {
+    const length = 12;
+    const charset =
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+~`|}{[]:;?><,./-=";
+    let password = "";
+    for (let i = 0; i < length; i++) {
+      password += charset.charAt(Math.floor(Math.random() * charset.length));
+    }
+    return password;
+  },
+};
+

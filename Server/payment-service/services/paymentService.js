@@ -72,8 +72,10 @@ const generatePaymentParams = (
   orderId,
   amount,
   currency,
+  description,
   customerId,
-  customerInfo
+  customerInfo,
+  paymentMethod
 ) => {
   // Generate hash
   const hash = generateHash(orderId, amount, currency);
@@ -101,6 +103,7 @@ const generatePaymentParams = (
     city: customerInfo?.city || "Colombo",
     country: customerInfo?.country || "Sri Lanka",
     hash: hash,
+    payment_method: paymentMethod,
   };
 };
 
