@@ -7,7 +7,7 @@ import AdminDashboard from "./pages/admin/Dashboard";
 import AdminUsers from "./pages/admin/Users";
 import AdminRestaurantAdmins from "./pages/admin/RestaurantAdmins";
 import RestaurantManagement from "./pages/admin/RestaurantManagement";
-import AdminDeliveryPersonnel from "./pages/admin/DeliveryPersonnel";
+import OrderManagement from "./pages/admin/OrderManagement";
 import RestaurantAdminDashboard from "./pages/restaurant-admin/Dashboard";
 import RestaurantAdminProfile from "./pages/restaurant-admin/Profile";
 import NotFound from "./pages/NotFound";
@@ -38,13 +38,14 @@ function App() {
                 element={<AdminRestaurantAdmins />}
               />
               <Route
-                path="delivery-personnel"
-                element={<AdminDeliveryPersonnel />}
-              />
-              <Route
                 path="restaurant-management"
                 element={<RestaurantManagement />}
               />
+
+              <Route path="orders" 
+              element={<OrderManagement />}
+              />
+
             </Route>
           </Route>
 

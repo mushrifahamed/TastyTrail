@@ -5,7 +5,7 @@ import {
   MdDashboard,
   MdPeople,
   MdRestaurant,
-  MdDeliveryDining,
+  MdShoppingCart,
   MdLogout,
   MdPerson,
 } from "react-icons/md";
@@ -14,14 +14,14 @@ const adminLinks = [
   { name: "Dashboard", path: "/admin", icon: <MdDashboard /> },
   { name: "Users", path: "/admin/users", icon: <MdPeople /> },
   {
-    name: "Restaurant Management",  // Changed text from 'Restaurant Admins' to 'Restaurant Management'
+    name: "Restaurant Management",
     path: "/admin/restaurant-management",
     icon: <MdRestaurant />,
   },
   {
-    name: "Delivery Personnel",
-    path: "/admin/delivery-personnel",
-    icon: <MdDeliveryDining />,
+    name: "Orders",
+    path: "/admin/orders",
+    icon: <MdShoppingCart />,
   },
 ];
 
@@ -38,12 +38,14 @@ const Sidebar = ({ role }) => {
 
   return (
     <div className="w-64 bg-gray-800 text-white h-screen fixed">
+      {/* Role-specific Header */}
       <div className="p-4 border-b border-gray-700">
         <h1 className="text-xl font-bold">
           {role === "admin" ? "Admin Panel" : "Restaurant Admin"}
         </h1>
       </div>
 
+      {/* Links */}
       <nav className="p-4">
         <ul className="space-y-2">
           {links.map((link) => (
@@ -62,7 +64,18 @@ const Sidebar = ({ role }) => {
         </ul>
       </nav>
 
+      {/* Logo Section and Logout Button */}
       <div className="absolute bottom-0 w-full p-4">
+        {/* Logo Section */}
+        <div className="border-t border-gray-700 pt-4 mb-4">
+          <img
+            src="/TastyTrail.png" // Replace with your logo image path
+            alt="Logo"
+            className="h-50 w-auto mx-auto" // You can adjust the size and styling of the logo here
+          />
+        </div>
+
+        {/* Logout Button */}
         <button
           onClick={logout}
           className="w-full flex items-center justify-center p-2 rounded-lg bg-red-600 hover:bg-red-700"

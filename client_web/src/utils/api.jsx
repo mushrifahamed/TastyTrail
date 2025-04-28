@@ -10,6 +10,10 @@ const restaurantServiceApi = axios.create({
   baseURL: "http://localhost:3001", // Restaurant service running on port 3001
 });
 
+const orderServiceApi = axios.create({
+  baseURL: "http://localhost:3002", // Order service running on port 3002
+});
+
 // Add a request interceptor to include the token for both services
 const addAuthToken = (config) => {
   const token = localStorage.getItem("token");
@@ -33,6 +37,15 @@ restaurantServiceApi.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+// Add request interceptor to include auth token
+orderServiceApi.interceptors.request.use((config) => {
+  const token = localStorage.getItem("token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 // Add a response interceptor (Optional): Can be used to handle token expiration or error logging
 const handleResponseError = (error) => {
   if (error.response && error.response.status === 401) {
@@ -53,4 +66,4 @@ restaurantServiceApi.interceptors.response.use(
 );
 
 // Export the instances to use for different services
-export { userServiceApi, restaurantServiceApi };
+export { userServiceApi, restaurantServiceApi, orderServiceApi };

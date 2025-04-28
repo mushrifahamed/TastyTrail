@@ -118,6 +118,26 @@ const addRestaurant = async (req, res) => {
       });
     }
 
+    // Additional validation for coordinates
+    const longitude = parseFloat(address.geoCoordinates.longitude);
+    const latitude = parseFloat(address.geoCoordinates.latitude);
+    
+    if (isNaN(longitude)) {
+      return res.status(400).json({ message: "Invalid longitude value" });
+    }
+    
+    if (isNaN(latitude)) {
+      return res.status(400).json({ message: "Invalid latitude value" });
+    }
+    
+    if (longitude < -180 || longitude > 180) {
+      return res.status(400).json({ message: "Longitude must be between -180 and 180" });
+    }
+    
+    if (latitude < -90 || latitude > 90) {
+      return res.status(400).json({ message: "Latitude must be between -90 and 90" });
+    }
+
     await newRestaurant.save();
 
     res.status(201).json({
@@ -242,36 +262,55 @@ const getRestaurantAvailability = async (req, res) => {
 const getRestaurantById = async (req, res) => {
   const { id } = req.params;
 
-  // 1. Validate ObjectId
   if (!mongoose.Types.ObjectId.isValid(id)) {
+    console.error(`Invalid restaurant ID: ${id}`);
     return res.status(400).json({ 
       status: "fail",
-      message: "Invalid restaurant ID format" 
+      message: "Invalid restaurant ID format",
+      receivedId: id
     });
   }
 
   try {
-    // 2. Fetch restaurant
-    const restaurant = await Restaurant.findById(id);
+    const restaurant = await Restaurant.findById(id).lean();
+    
     if (!restaurant) {
+      console.error(`Restaurant not found: ${id}`);
       return res.status(404).json({ 
         status: "fail",
-        message: "Restaurant not found" 
+        message: "Restaurant not found",
+        restaurantId: id
       });
     }
 
-    // 3. Success response
+    // Ensure required fields have fallback values
+    if (!restaurant.name) {
+      console.warn(`Restaurant ${id} has no name field`);
+      restaurant.name = "Unnamed Restaurant";
+    }
+
     res.status(200).json({ 
-      status: "success", 
-      data: restaurant 
+      status: "success",
+      data: {
+        restaurant: {
+          _id: restaurant._id,
+          name: restaurant.name,
+          description: restaurant.description || "",
+          address: restaurant.address,
+          menu: restaurant.menu || [],
+          coverImage: restaurant.coverImage || null,
+          operatingHours: restaurant.operatingHours || { from: "09:00", to: "21:00" },
+          availability: restaurant.availability ?? true
+        }
+      }
     });
 
   } catch (err) {
-    // 4. Log and handle errors
-    console.error("Error in getRestaurantById:", err);
+    console.error(`Error fetching restaurant ${id}:`, err);
     res.status(500).json({ 
       status: "error",
-      message: "Server error fetching restaurant" 
+      message: "Server error fetching restaurant",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 };

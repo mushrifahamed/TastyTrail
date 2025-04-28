@@ -137,6 +137,7 @@ module.exports = upload;
 /* File: ./server/restaurant-service\controllers\restaurantController.js */
 const axios = require("axios");
 const mongoose = require('mongoose');
+const path = require('path');
 const Restaurant = require("../models/restaurantModel");
 const { calculateDistance } = require("../utils/geolocation");
 const upload = require("../config/multerConfig");
@@ -252,6 +253,26 @@ const addRestaurant = async (req, res) => {
         error: validationError.message,
         details: validationError.errors
       });
+    }
+
+    // Additional validation for coordinates
+    const longitude = parseFloat(address.geoCoordinates.longitude);
+    const latitude = parseFloat(address.geoCoordinates.latitude);
+    
+    if (isNaN(longitude)) {
+      return res.status(400).json({ message: "Invalid longitude value" });
+    }
+    
+    if (isNaN(latitude)) {
+      return res.status(400).json({ message: "Invalid latitude value" });
+    }
+    
+    if (longitude < -180 || longitude > 180) {
+      return res.status(400).json({ message: "Longitude must be between -180 and 180" });
+    }
+    
+    if (latitude < -90 || latitude > 90) {
+      return res.status(400).json({ message: "Latitude must be between -90 and 90" });
     }
 
     await newRestaurant.save();
@@ -473,44 +494,152 @@ const getAllRestaurants = async (req, res) => {
   }
 };
 
-// Manage menu items (add/update/remove items with images)
-const manageMenu = async (req, res) => {
-  const { restaurantId, action, menuItemId, menuItem } = req.body;
-
-  // Handle image upload for the menu item
-  const menuItemImage = req.file ? req.file.path : null;
-
+// Add menu item to restaurant
+const addMenuItem = async (req, res) => {
   try {
+    const { restaurantId } = req.params;
+    const menuItem = req.body;
+    const menuItemImage = req.file ? 
+      path.join('uploads', 'menu-items', req.file.filename).replace(/\\/g, '/') : 
+      null;
+
+    // Validate required fields
+    if (!menuItem.name || !menuItem.price) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Name and price are required for menu items"
+      });
+    }
+
     const restaurant = await Restaurant.findById(restaurantId);
     if (!restaurant) {
-      return res.status(404).json({ message: "Restaurant not found" });
+      return res.status(404).json({
+        status: "fail",
+        message: "Restaurant not found"
+      });
     }
 
-    // Check if an image needs to be added or updated for the menu item
-    if (menuItemImage) {
-      menuItem.image = menuItemImage;
-    }
+    const newItem = {
+      ...menuItem,
+      _id: new mongoose.Types.ObjectId(),
+      image: menuItemImage,
+      price: parseFloat(menuItem.price)
+    };
 
-    if (action === "add") {
-      restaurant.menu.push(menuItem);
-    } else if (action === "update") {
-      const index = restaurant.menu.findIndex(
-        (item) => item._id.toString() === menuItemId
-      );
-      if (index === -1) {
-        return res.status(404).json({ message: "Menu item not found" });
+    restaurant.menu.push(newItem);
+    const updatedRestaurant = await restaurant.save();
+
+    return res.status(201).json({
+      status: "success",
+      data: {
+        menuItem: updatedRestaurant.menu.slice(-1)[0]
       }
-      restaurant.menu[index] = menuItem; // Update the menu item
-    } else if (action === "remove") {
-      restaurant.menu = restaurant.menu.filter(
-        (item) => item._id.toString() !== menuItemId
-      ); // Remove item
+    });
+  } catch (err) {
+    console.error('Error in addMenuItem:', err);
+    return res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+      error: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  }
+};
+
+// Update menu item
+const updateMenuItem = async (req, res) => {
+  try {
+    const { restaurantId, menuItemId } = req.params;
+    const menuItem = req.body;
+    const menuItemImage = req.file ? 
+      path.join('uploads', 'menu-items', req.file.filename).replace(/\\/g, '/') : 
+      null;
+
+    // Validate required fields
+    if (!menuItem.name || !menuItem.price) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Name and price are required for menu items"
+      });
+    }
+
+    const restaurant = await Restaurant.findById(restaurantId);
+    if (!restaurant) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Restaurant not found"
+      });
+    }
+
+    const itemIndex = restaurant.menu.findIndex(item => item._id.toString() === menuItemId);
+    if (itemIndex === -1) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Menu item not found"
+      });
+    }
+
+    restaurant.menu[itemIndex] = {
+      ...restaurant.menu[itemIndex],
+      ...menuItem,
+      price: parseFloat(menuItem.price),
+      image: menuItemImage || restaurant.menu[itemIndex].image
+    };
+
+    const updatedRestaurant = await restaurant.save();
+    return res.status(200).json({
+      status: "success",
+      data: {
+        menuItem: updatedRestaurant.menu[itemIndex]
+      }
+    });
+  } catch (err) {
+    console.error('Error in updateMenuItem:', err);
+    return res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+      error: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  }
+};
+
+// Delete menu item
+const deleteMenuItem = async (req, res) => {
+  try {
+    const { restaurantId, menuItemId } = req.params;
+
+    const restaurant = await Restaurant.findById(restaurantId);
+    if (!restaurant) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Restaurant not found"
+      });
+    }
+
+    const initialLength = restaurant.menu.length;
+    restaurant.menu = restaurant.menu.filter(item => item._id.toString() !== menuItemId);
+    
+    if (restaurant.menu.length === initialLength) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Menu item not found"
+      });
     }
 
     await restaurant.save();
-    res.status(200).json({ message: "Menu updated", restaurant });
+    return res.status(204).json({
+      status: "success",
+      data: null
+    });
   } catch (err) {
-    res.status(500).json({ message: "Error managing menu", err });
+    console.error('Error in deleteMenuItem:', err);
+    return res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+      error: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 };
 
@@ -540,10 +669,10 @@ module.exports = {
   getRestaurantById,
   verifyRestaurant,
   getAllRestaurants,
-  manageMenu,
+  addMenuItem,
+  updateMenuItem,
+  deleteMenuItem,
   searchRestaurants,
-
-
 };
 
 
@@ -668,14 +797,27 @@ router.get("/", restaurantController.getAllRestaurants); // Add this route to ge
 router.get("/:id/availability", restaurantController.getRestaurantAvailability);
 
 // Get restaurant details by ID (public)
-router.get("/:id", restaurantController.getRestaurantById);
+//router.get("/:id", restaurantController.getRestaurantById);
 
-// Manage menu (add/update/remove items) shoul have verify token
-router.put(
-  "/:id/menu",
+// Menu Item Management Routes
+router.post(
+  "/:restaurantId/menu",
   upload.single("menuItemImage"),
   verifyToken(['admin', 'restaurant_admin']),
-  restaurantController.manageMenu
+  restaurantController.addMenuItem
+);
+
+router.put(
+  "/:restaurantId/menu/:menuItemId",
+  upload.single("menuItemImage"),
+  verifyToken(['admin', 'restaurant_admin']),
+  restaurantController.updateMenuItem
+);
+
+router.delete(
+  "/:restaurantId/menu/:menuItemId",
+  verifyToken(['admin', 'restaurant_admin']),
+  restaurantController.deleteMenuItem
 );
 
 // search restaurants
@@ -712,7 +854,7 @@ const rateLimit = require('express-rate-limit');
 // Apply a rate limit of 100 requests per 1 minute per IP address
 const rateLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,  // 1 minute
-  max: 100,                 // Limit each IP to 100 requests per windowMs
+  max: 50,                 // Limit each IP to 100 requests per windowMs
   message: "Too many requests, please try again later.", // Custom error message
 });
 
