@@ -1,11 +1,15 @@
 // In screens/cart/checkout_screen.dart
 
+import 'package:client_customer/providers/auth_provider.dart';
+import 'package:client_customer/screens/cart/order_confirmation_screen.dart';
 import 'package:client_customer/screens/location_picker_screen.dart';
+import 'package:client_customer/services/payhere_service.dart';
 import 'package:client_customer/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:payhere_mobilesdk_flutter/payhere_mobilesdk_flutter.dart';
 import 'package:provider/provider.dart';
 import '../../providers/cart_provider.dart';
 
@@ -365,7 +369,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       ),
                     ),
 
-                    const SizedBox(height: 100), // Space for the fixed button
+                    const SizedBox(
+                      height: 100,
+                    ), // Space for the fixed button
                   ],
                 ),
               ),
@@ -391,7 +397,229 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     child: ElevatedButton(
                       onPressed: _isProcessing
                           ? null
-                          : () => _placeOrder(cartProvider),
+                          : () async {
+                              if (_addressController.text.isEmpty ||
+                                  _selectedLocation == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text(
+                                          'Please enter your delivery address')),
+                                );
+                                return;
+                              }
+
+                              setState(() {
+                                _isProcessing = true;
+                              });
+                              print(
+                                  "[CheckoutScreen] Place Order button pressed."); // Log: Button press
+
+                              try {
+                                final cartProvider = Provider.of<CartProvider>(
+                                    context,
+                                    listen: false);
+
+                                // For Cash on Delivery
+                                if (_selectedPaymentMethod ==
+                                    'Cash on Delivery') {
+                                  print(
+                                      "[CheckoutScreen] Processing Cash on Delivery..."); // Log: COD start
+                                  final result =
+                                      await cartProvider.checkoutRestaurant(
+                                    _selectedRestaurantId,
+                                    _addressController.text,
+                                    'cash',
+                                    _selectedLocation != null
+                                        ? [
+                                            _selectedLocation!.longitude,
+                                            _selectedLocation!.latitude
+                                          ]
+                                        : null,
+                                  );
+
+                                  if (!result['success']) {
+                                    throw Exception(result['message'] ??
+                                        'Failed to place order');
+                                  }
+
+                                  if (!mounted) return;
+
+                                  // Navigate to confirmation screen with order data
+                                  await Navigator.pushNamedAndRemoveUntil(
+                                    context,
+                                    OrderConfirmationScreen.routeName,
+                                    (route) => false,
+                                    arguments: result['order'],
+                                  );
+                                  print(
+                                      "[CheckoutScreen] Cash on Delivery processed."); // Log: COD end
+                                  return;
+                                }
+
+                                // For Credit Card - PayHere integration
+                                if (_selectedPaymentMethod == 'Credit Card') {
+                                  print(
+                                      "[CheckoutScreen] Processing Credit Card Payment...");
+
+                                  // First create order in your backend
+                                  final orderResponse =
+                                      await cartProvider.checkoutRestaurant(
+                                    _selectedRestaurantId,
+                                    _addressController.text,
+                                    'card',
+                                    _selectedLocation != null
+                                        ? [
+                                            _selectedLocation!.longitude,
+                                            _selectedLocation!.latitude
+                                          ]
+                                        : null,
+                                  );
+
+                                  if (!orderResponse['success']) {
+                                    throw Exception(orderResponse['message'] ??
+                                        'Failed to create order');
+                                  }
+
+                                  final orderData = orderResponse['order'] ??
+                                      orderResponse['data']?['order'];
+                                  if (orderData == null) {
+                                    throw Exception(
+                                        'Invalid order data received from server');
+                                  }
+
+                                  final orderId = orderData['_id'];
+                                  if (orderId == null || orderId.isEmpty) {
+                                    throw Exception(
+                                        'Could not extract order ID from response');
+                                  }
+
+                                  final totalAmount = double.parse(
+                                      orderData['totalAmount'].toString());
+
+                                  // Get user info for payment
+                                  final user = Provider.of<AuthProvider>(
+                                          context,
+                                          listen: false)
+                                      .user;
+                                  final customerName = user?.name ?? 'Customer';
+                                  final customerEmail = user?.email;
+                                  final customerPhone = user?.phone;
+
+                                  // Initialize PayHere payment
+                                  final payhereService = PayhereService();
+                                  final paymentResult =
+                                      await payhereService.initiatePayment(
+                                    orderId: orderId,
+                                    amount: totalAmount,
+                                    items:
+                                        "Order from $_selectedRestaurantName",
+                                    customerName: customerName,
+                                    email: customerEmail,
+                                    phone: customerPhone,
+                                    address: _addressController.text,
+                                  );
+
+                                  if (!paymentResult['success']) {
+                                    throw Exception(paymentResult['message']);
+                                  }
+
+                                  // Launch PayHere payment gateway
+                                  PayHere.startPayment(
+                                    paymentResult['paymentObject'],
+                                    (paymentId) async {
+                                      print(
+                                          "[CheckoutScreen] Payment Success. PaymentId: $paymentId");
+                                      print(
+                                          "[CheckoutScreen] Original order data: $orderData");
+
+                                      final updateResult = await payhereService
+                                          .savePaymentDetails(
+                                        orderId: orderId,
+                                        paymentId: paymentId,
+                                        amount: totalAmount,
+                                        status: 'completed',
+                                      );
+
+                                      if (!mounted) return;
+
+                                      if (updateResult['success']) {
+                                        final confirmationData =
+                                            Map<String, dynamic>.from(
+                                                orderData);
+                                        confirmationData['totalAmount'] =
+                                            totalAmount;
+                                        confirmationData['paymentType'] =
+                                            'Credit Card';
+                                        confirmationData['paymentStatus'] =
+                                            'completed';
+                                        confirmationData['paymentId'] =
+                                            paymentId;
+
+                                        print(
+                                            "[CheckoutScreen] Confirmation data being sent: $confirmationData");
+
+                                        await Navigator.pushNamedAndRemoveUntil(
+                                          context,
+                                          OrderConfirmationScreen.routeName,
+                                          (route) => false,
+                                          arguments: confirmationData,
+                                        );
+                                      } else {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                              content: Text(updateResult[
+                                                      'message'] ??
+                                                  'Failed to update payment status')),
+                                        );
+                                        setState(() {
+                                          _isProcessing = false;
+                                        });
+                                      }
+                                    },
+                                    (error) {
+                                      // Payment failed callback
+                                      print("Payment Error: $error");
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                            content:
+                                                Text('Payment failed: $error')),
+                                      );
+                                      setState(() {
+                                        _isProcessing = false;
+                                      });
+                                    },
+                                    () {
+                                      // Payment dismissed callback
+                                      print("Payment Dismissed");
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                            content: Text(
+                                                'Payment cancelled by user')),
+                                      );
+                                      setState(() {
+                                        _isProcessing = false;
+                                      });
+                                    },
+                                  );
+                                }
+                              } catch (e) {
+                                print(
+                                    "[CheckoutScreen] Error in checkout process: $e"); // Log: Error
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                      content: Text('Error: ${e.toString()}')),
+                                );
+                                setState(() {
+                                  _isProcessing = false;
+                                });
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
@@ -399,25 +627,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        minimumSize: const Size(double.infinity, 50),
                       ),
                       child: _isProcessing
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Colors.white),
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : const Text(
-                              'Place Order',
+                          ? const CircularProgressIndicator(
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white))
+                          : const Text('Place Order',
                               style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                                  fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ),
@@ -454,93 +671,5 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         ],
       ),
     );
-  }
-
-  Future<void> _placeOrder(CartProvider cartProvider) async {
-    if (_addressController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a delivery address')),
-      );
-      return;
-    }
-
-    if (_selectedLocation == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Please select a delivery location on map')),
-      );
-      return;
-    }
-
-    setState(() {
-      _isProcessing = true;
-    });
-
-    try {
-      // Pass both address and payment method to the backend
-      await cartProvider.checkoutRestaurant(
-        _selectedRestaurantId,
-        _addressController.text.trim(),
-        _selectedPaymentMethod,
-        [_selectedLocation!.longitude, _selectedLocation!.latitude],
-      );
-
-      if (!mounted) return;
-
-      // Show success and navigate
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Order placed successfully!')),
-      );
-
-      Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
-
-      // Show order confirmation dialog
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: const Text('Order Confirmed!'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.check_circle,
-                color: Colors.green,
-                size: 64,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Your order from $_selectedRestaurantName has been placed successfully.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'You can track your order in the orders section.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${error.toString()}')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-        });
-      }
-    }
   }
 }

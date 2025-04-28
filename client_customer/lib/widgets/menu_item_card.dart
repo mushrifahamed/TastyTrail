@@ -9,11 +9,11 @@ class MenuItemCard extends StatelessWidget {
   final VoidCallback onAddToCart;
 
   const MenuItemCard({
-    Key? key,
+    super.key,
     required this.menuItem,
     required this.restaurantId,
     required this.onAddToCart,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -30,37 +30,36 @@ class MenuItemCard extends StatelessWidget {
               child: SizedBox(
                 width: 80,
                 height: 80,
-                child:
-                    menuItem.image.isNotEmpty
-                        ? Image.network(
-                          menuItem.image,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: Colors.grey[300],
-                              child: const Icon(
-                                Icons.restaurant,
-                                color: Colors.grey,
-                              ),
-                            );
-                          },
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) return child;
-                            return Container(
-                              color: Colors.grey[200],
-                              child: const Center(
-                                child: CircularProgressIndicator(),
-                              ),
-                            );
-                          },
-                        )
-                        : Container(
-                          color: Colors.grey[300],
-                          child: const Icon(
-                            Icons.restaurant,
-                            color: Colors.grey,
-                          ),
+                child: menuItem.image.isNotEmpty
+                    ? Image.network(
+                        menuItem.image,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            color: Colors.grey[300],
+                            child: const Icon(
+                              Icons.restaurant,
+                              color: Colors.grey,
+                            ),
+                          );
+                        },
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Container(
+                            color: Colors.grey[200],
+                            child: const Center(
+                              child: CircularProgressIndicator(),
+                            ),
+                          );
+                        },
+                      )
+                    : Container(
+                        color: Colors.grey[300],
+                        child: const Icon(
+                          Icons.restaurant,
+                          color: Colors.grey,
                         ),
+                      ),
               ),
             ),
             const SizedBox(width: 16),

@@ -4,9 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../models/restaurant.dart';
 import '../../providers/restaurant_provider.dart';
-import '../../providers/cart_provider.dart';
 import '../../theme/app_theme.dart';
-import '../restaurant/restaurant_screen.dart';
 import '../cart/cart_screen.dart';
 
 class HomeScreen extends StatefulWidget {

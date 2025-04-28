@@ -309,7 +309,7 @@ const checkoutCart = async (req, res, next) => {
 const checkoutRestaurant = async (req, res, next) => {
   try {
     const customerId = req.user.id;
-    const { restaurantId, deliveryAddress } = req.body;
+    const { restaurantId, deliveryAddress, paymentMethod } = req.body;
     const token = req.headers.authorization?.split(" ")[1];
 
     if (!req.body.deliveryLocation || !req.body.deliveryLocation.coordinates) {
@@ -382,6 +382,7 @@ const checkoutRestaurant = async (req, res, next) => {
       deliveryLocation,
       totalAmount,
       paymentStatus: "pending",
+      paymentType: paymentMethod,
       estimatedDeliveryTime: estimatedTime,
       trackingStatus: "placed",
       statusUpdates: [
@@ -403,7 +404,8 @@ const checkoutRestaurant = async (req, res, next) => {
       totalAmount,
       customerId,
       `Order #${savedOrder._id} for restaurant ${restaurantId}`,
-      token
+      token,
+      paymentMethod
     );
 
     // Update order with payment ID
@@ -427,7 +429,7 @@ const checkoutRestaurant = async (req, res, next) => {
         checkoutUrl: paymentResponse.checkoutUrl,
         paymentParams: paymentResponse.paymentParams,
       },
-      cart: cart, // Return the updated cart with remaining items
+      cart: cart,
     });
   } catch (error) {
     next(error);

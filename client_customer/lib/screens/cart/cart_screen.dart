@@ -9,7 +9,7 @@ import '../../services/restaurant_service.dart';
 import '../../models/restaurant.dart';
 
 class CartScreen extends StatefulWidget {
-  const CartScreen({Key? key}) : super(key: key);
+  const CartScreen({super.key});
 
   @override
   _CartScreenState createState() => _CartScreenState();
@@ -17,7 +17,7 @@ class CartScreen extends StatefulWidget {
 
 class _CartScreenState extends State<CartScreen> {
   final RestaurantService _restaurantService = RestaurantService();
-  Map<String, Restaurant> _restaurants = {};
+  final Map<String, Restaurant> _restaurants = {};
   bool _loadingRestaurants = false;
 
   @override

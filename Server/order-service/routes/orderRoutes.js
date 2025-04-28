@@ -22,7 +22,12 @@ router.get(
 );
 router.get(
   "/:id",
-  authMiddleware(["customer", "restaurant_admin", "delivery_personnel"]),
+  authMiddleware([
+    "customer",
+    "restaurant_admin",
+    "delivery_personnel",
+    "internal_service",
+  ]),
   getOrderWithSubOrders
 );
 

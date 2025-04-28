@@ -186,12 +186,14 @@ class CartProvider with ChangeNotifier {
   }
 
 // Checkout items from a specific restaurant
-  Future<void> checkoutRestaurant(
+  Future<Map<String, dynamic>> checkoutRestaurant(
     String restaurantId,
     String deliveryAddress,
     String paymentMethod,
     List<double>? coordinates,
   ) async {
+    print(
+        "[CartProvider] checkoutRestaurant called with restaurantId: $restaurantId, paymentMethod: $paymentMethod"); // Log: Method start
     try {
       _isLoading = true;
       notifyListeners();
@@ -205,20 +207,76 @@ class CartProvider with ChangeNotifier {
         throw Exception('No items for this restaurant');
       }
 
-      // Call checkout API with payment method
-      await _cartService.checkoutRestaurant(
+      // Prepare payload
+      final payload = {
+        'restaurantId': restaurantId,
+        'deliveryAddress': deliveryAddress,
+        'paymentMethod': paymentMethod,
+        'deliveryLocation': {
+          'coordinates': coordinates,
+        },
+      };
+      print(
+          "[CartProvider] Calling _cartService.checkoutRestaurant with payload: $payload"); // Log: Before API call
+
+      // Call checkout API
+      final response = await _cartService.checkoutRestaurant(
           restaurantId, deliveryAddress, paymentMethod, coordinates);
 
+      // Log response for debugging
+      print(
+          "[CartProvider] _cartService.checkoutRestaurant response: $response"); // Log: After API call
+
       // Refresh cart after checkout
+      print(
+          "[CartProvider] Fetching cart after checkout..."); // Log: Before fetchCart
       await fetchCart();
+      print("[CartProvider] Cart fetched."); // Log: After fetchCart
 
       _isLoading = false;
       notifyListeners();
+
+      // Properly extract order data from the nested structure
+      if (response['success'] == true &&
+          response['data'] != null &&
+          response['data']['order'] != null) {
+        print(
+            "[CartProvider] Checkout successful, returning order data."); // Log: Success
+        return {
+          'success': true,
+          'order': response['data']['order'],
+        };
+      } else if (response['success'] == true) {
+        // Fallback if the structure isn't as expected but success is true
+        print(
+            "[CartProvider] Checkout reported success, but order data structure might be unexpected. Returning data."); // Log: Success with fallback
+        return {
+          'success': true,
+          'data': response['data'], // Return the whole data part
+          'order': response['data']?['order'] ??
+              response['data'] ??
+              {}, // Attempt to extract order or return data/empty map
+        };
+      } else {
+        // Handle failure case reported by the service
+        print(
+            "[CartProvider] Checkout failed according to response: ${response['message']}"); // Log: Failure from response
+        _error = response['message'] ?? 'Checkout failed';
+        return {
+          'success': false,
+          'message': _error,
+        };
+      }
     } catch (error) {
+      print(
+          "[CartProvider] Error during checkoutRestaurant: $error"); // Log: Catch block error
       _isLoading = false;
       _error = error.toString();
       notifyListeners();
-      throw error;
+      return {
+        'success': false,
+        'message': error.toString(),
+      };
     }
   }
 }
