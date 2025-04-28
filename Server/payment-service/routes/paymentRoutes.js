@@ -7,6 +7,7 @@ const {
   getPaymentByOrderId,
   getPaymentsByCustomerId,
   processRefund,
+  storePaymentDetails,
 } = require("../controllers/paymentController");
 const authMiddleware = require("../utils/authMiddleware");
 
@@ -15,6 +16,12 @@ router.post(
   "/",
   authMiddleware(["customer", "restaurant_admin", "admin", "internal_service"]),
   createPayment
+);
+
+router.post(
+  "/store",
+  authMiddleware(["customer", "restaurant_admin", "admin", "internal_service"]),
+  storePaymentDetails
 );
 
 // Process payment notification from PayHere (no auth - public endpoint)

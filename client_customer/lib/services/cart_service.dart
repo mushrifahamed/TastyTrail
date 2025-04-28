@@ -155,7 +155,7 @@ class CartService {
       }
 
       final response = await http.delete(
-        Uri.parse('$baseUrl'),
+        Uri.parse(baseUrl),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -275,33 +275,50 @@ class CartService {
   }
 
   Future<Map<String, dynamic>> checkoutRestaurant(
-      String restaurantId,
-      String deliveryAddress,
-      String paymentMethod,
-      List<double>? coordinates) async {
+    String restaurantId,
+    String deliveryAddress,
+    String paymentMethod,
+    List<double>? coordinates,
+  ) async {
     try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('No authentication token found');
+      }
+
       final response = await http.post(
         Uri.parse('$baseUrl/checkout'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${await _authService.getToken()}',
+          'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
           'restaurantId': restaurantId,
           'deliveryAddress': deliveryAddress,
           'paymentMethod': paymentMethod,
           'deliveryLocation': {
-            'type': 'Point',
-            'coordinates': coordinates ?? [0, 0], // Format for GeoJSON
+            'coordinates': coordinates,
           },
         }),
       );
 
-      // Process response...
-      return json.decode(response.body);
+      if (response.statusCode == 201) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
+      } else {
+        final errorData = jsonDecode(response.body);
+        return {
+          'success': false,
+          'message': errorData['message'] ?? 'Failed to checkout',
+        };
+      }
     } catch (e) {
-      // Handle exceptions...
-      throw Exception('Failed to checkout: $e');
+      return {
+        'success': false,
+        'message': 'Error during checkout: $e',
+      };
     }
   }
 }
