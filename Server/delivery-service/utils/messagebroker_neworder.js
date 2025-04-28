@@ -2,8 +2,11 @@ const amqp = require('amqplib/callback_api');
 const DeliveryPerson = require('../models/deliveryPerson');
 const Order = require('../models/orders');
 
+const rabbitmqHost = process.env.RABBITMQ_HOST || 'localhost';  // Smart dynamic
+const rabbitmqURL = `amqp://${rabbitmqHost}`;
+
 const listenForNewOrders = () => {
-    amqp.connect('amqp://localhost', (error, connection) => {
+    amqp.connect(rabbitmqURL, (error, connection) => {
         if (error) {
             throw error;
         }

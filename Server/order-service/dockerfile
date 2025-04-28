@@ -1,0 +1,23 @@
+# Choose your base image (Node.js example)
+FROM node:20
+
+# Set working directory
+WORKDIR /app
+
+# Copy project files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Then copy rest of files
+COPY . .
+
+# Start service
+# CMD ["npm", "start"]
+RUN npm install -g nodemon
+CMD ["nodemon", "server.js"]
+
+
+# Expose port (your service's internal port)
+EXPOSE 3002
