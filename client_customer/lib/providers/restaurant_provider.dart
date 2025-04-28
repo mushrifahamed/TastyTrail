@@ -1,5 +1,8 @@
 // lib/providers/restaurant_provider.dart
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../models/restaurant.dart';
 import '../services/restaurant_service.dart';
 
@@ -94,5 +97,31 @@ class RestaurantProvider with ChangeNotifier {
   void clearSelectedRestaurant() {
     _selectedRestaurant = null;
     notifyListeners();
+  }
+
+  Future<Restaurant> getRestaurantById(String restaurantId) async {
+    print('Getting restaurant details for ID: $restaurantId');
+
+    try {
+      final response = await http.get(
+        Uri.parse('http://10.0.2.2:3001/api/restaurants/$restaurantId'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        print('Restaurant API response received');
+        final data = json.decode(response.body);
+        return Restaurant.fromJson(data);
+      } else {
+        print('API error status: ${response.statusCode}');
+        throw Exception(
+            'Failed to load restaurant details: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching restaurant: $e');
+      throw Exception('Error fetching restaurant: $e');
+    }
   }
 }

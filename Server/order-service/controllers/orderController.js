@@ -8,13 +8,12 @@ const notificationService = require("../services/notificationService");
 const estimationService = require("../services/estimationService");
 const userService = require("../services/userService");
 const { RESTAURANT_SERVICE_URL } = process.env;
-const amqp = require('amqplib/callback_api');
-
+const amqp = require("amqplib/callback_api");
 
 // Function to publish an event to RabbitMQ
 // Function to publish the order created event to RabbitMQ
 const publishOrderCreatedEvent = (orderId) => {
-  amqp.connect('amqp://localhost', (error, connection) => {
+  amqp.connect("amqp://localhost", (error, connection) => {
     if (error) {
       throw error;
     }
@@ -24,8 +23,8 @@ const publishOrderCreatedEvent = (orderId) => {
         throw error;
       }
 
-      const queue = 'order_created_queue';  // Queue name where delivery service listens
-      const msg = JSON.stringify({ orderId });  // Message payload (only orderId)
+      const queue = "order_created_queue"; // Queue name where delivery service listens
+      const msg = JSON.stringify({ orderId }); // Message payload (only orderId)
 
       channel.assertQueue(queue, { durable: true });
       channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
@@ -49,6 +48,10 @@ const createOrder = async (req, res, next) => {
       deliveryAddress,
       deliveryLocation,
     } = req.body;
+
+    if (!deliveryAddress) {
+      return res.status(400).json({ message: "Delivery address is required" });
+    }
 
     // Ensure all items are from the same restaurant
     const restaurantIds = [
@@ -76,11 +79,13 @@ const createOrder = async (req, res, next) => {
     // Calculate total amount
     const totalAmount = orderSplitter.calculateOrderTotal(items);
 
+    console.log("Delivery location:", deliveryLocation);
+
     // Calculate estimated delivery time
     const estimatedTime = await estimationService.calculateEstimatedTime(
       items,
       deliveryLocation,
-      [restaurantId]
+      restaurantId
     );
 
     // Create the order
@@ -159,11 +164,7 @@ const createOrder = async (req, res, next) => {
 // Get order details
 const getOrderWithSubOrders = async (req, res, next) => {
   try {
-    const order = await Order.findById(req.params.id)
-      .populate("customerId", "name email")
-      .populate("items.restaurantId", "name address")
-      .populate("restaurantId", "name address")
-      .populate("deliveryPersonId", "name phone");
+    const order = await Order.findById(req.params.id);
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" });

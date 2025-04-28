@@ -10,7 +10,8 @@ const createPayment = async (
   amount,
   customerId,
   description,
-  token
+  token,
+  paymentMethod
 ) => {
   try {
     console.log("Creating payment with token:", token); // Debug log
@@ -21,6 +22,7 @@ const createPayment = async (
         amount,
         customerId,
         description,
+        paymentMethod,
       },
       {
         headers: {

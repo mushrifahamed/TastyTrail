@@ -1,18 +1,22 @@
+// File: services/cart_service.dart
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'auth_service.dart';
-import 'api_service.dart';
+import '../services/auth_service.dart';
 
 class CartService {
-  final String baseUrl = 'http://127.0.0.1:3001/api/cart';
+  final String baseUrl = 'http://10.0.2.2:3002/api/cart';
   final AuthService _authService = AuthService();
-  final ApiService _apiService = ApiService();
 
   Future<Map<String, dynamic>> getCart() async {
     try {
       final token = await _authService.getToken();
+
       if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
       }
 
       final response = await http.get(
@@ -23,16 +27,23 @@ class CartService {
         },
       );
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
       } else {
+        final errorMsg = _parseErrorMessage(response);
         return {
           'success': false,
-          'message': 'Failed to get cart: ${response.statusCode}',
+          'message': errorMsg,
         };
       }
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
     }
   }
 
@@ -45,17 +56,13 @@ class CartService {
   }) async {
     try {
       final token = await _authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
-      }
 
-      final body = {
-        'restaurantId': restaurantId,
-        'menuItemId': menuItemId,
-        'name': name,
-        'price': price,
-        'quantity': quantity,
-      };
+      if (token == null) {
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
+      }
 
       final response = await http.post(
         Uri.parse('$baseUrl/items'),
@@ -63,33 +70,46 @@ class CartService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: json.encode(body),
+        body: jsonEncode({
+          'restaurantId': restaurantId,
+          'menuItemId': menuItemId,
+          'name': name,
+          'price': price,
+          'quantity': quantity,
+        }),
       );
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
       } else {
+        final errorMsg = _parseErrorMessage(response);
         return {
           'success': false,
-          'message': 'Failed to add item to cart: ${response.statusCode}',
+          'message': errorMsg,
         };
       }
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
     }
   }
 
   Future<Map<String, dynamic>> updateCartItem(
-    String itemId,
-    int quantity,
-  ) async {
+      String itemId, int quantity) async {
     try {
       final token = await _authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
-      }
 
-      final body = {'itemId': itemId, 'quantity': quantity};
+      if (token == null) {
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
+      }
 
       final response = await http.patch(
         Uri.parse('$baseUrl/items'),
@@ -97,55 +117,41 @@ class CartService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: json.encode(body),
+        body: jsonEncode({
+          'itemId': itemId,
+          'quantity': quantity,
+        }),
       );
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
       } else {
+        final errorMsg = _parseErrorMessage(response);
         return {
           'success': false,
-          'message': 'Failed to update cart item: ${response.statusCode}',
+          'message': errorMsg,
         };
       }
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
-    }
-  }
-
-  Future<Map<String, dynamic>> removeFromCart(String itemId) async {
-    try {
-      final token = await _authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
-      }
-
-      final response = await http.delete(
-        Uri.parse('$baseUrl/items/$itemId'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
-      } else {
-        return {
-          'success': false,
-          'message': 'Failed to remove item from cart: ${response.statusCode}',
-        };
-      }
-    } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
     }
   }
 
   Future<Map<String, dynamic>> clearCart() async {
     try {
       final token = await _authService.getToken();
+
       if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
       }
 
       final response = await http.delete(
@@ -156,39 +162,39 @@ class CartService {
         },
       );
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'message': 'Cart cleared successfully',
+          'data': jsonDecode(response.body),
+        };
       } else {
+        final errorMsg = _parseErrorMessage(response);
         return {
           'success': false,
-          'message': 'Failed to clear cart: ${response.statusCode}',
+          'message': errorMsg,
         };
       }
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
     }
   }
 
+// Method to checkout the cart
   Future<Map<String, dynamic>> checkout(
-    String deliveryAddress,
-    Map<String, double> deliveryLocation,
-  ) async {
+      Map<String, dynamic> checkoutData) async {
     try {
       final token = await _authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'Not authenticated'};
-      }
 
-      final body = {
-        'deliveryAddress': deliveryAddress,
-        'deliveryLocation': {
-          'type': 'Point',
-          'coordinates': [
-            deliveryLocation['longitude'],
-            deliveryLocation['latitude'],
-          ],
-        },
-      };
+      if (token == null) {
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
+      }
 
       final response = await http.post(
         Uri.parse('$baseUrl/checkout'),
@@ -196,20 +202,123 @@ class CartService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: json.encode(body),
+        body: jsonEncode(checkoutData),
       );
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return {'success': true, 'data': json.decode(response.body)};
+      if (response.statusCode == 201) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
       } else {
+        final errorMsg = _parseErrorMessage(response);
         return {
           'success': false,
-          'message':
-              'Failed to checkout: ${response.statusCode} ${response.body}',
+          'message': errorMsg,
         };
       }
     } catch (e) {
-      return {'success': false, 'message': e.toString()};
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
+    }
+  }
+
+// Make sure you have this helper method in your class
+  String _parseErrorMessage(http.Response response) {
+    try {
+      final parsedResponse = jsonDecode(response.body);
+      return parsedResponse['message'] ?? 'Unknown error occurred';
+    } catch (e) {
+      return 'Error: ${response.statusCode}';
+    }
+  }
+
+  Future<Map<String, dynamic>> removeFromCart(String itemId) async {
+    try {
+      final token = await _authService.getToken();
+
+      if (token == null) {
+        return {
+          'success': false,
+          'message': 'You need to login first',
+        };
+      }
+
+      final response = await http.delete(
+        Uri.parse('$baseUrl/items/$itemId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
+      } else {
+        final errorMsg = _parseErrorMessage(response);
+        return {
+          'success': false,
+          'message': errorMsg,
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Failed to connect to server: $e',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> checkoutRestaurant(
+    String restaurantId,
+    String deliveryAddress,
+    String paymentMethod,
+    List<double>? coordinates,
+  ) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('No authentication token found');
+      }
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/checkout'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'restaurantId': restaurantId,
+          'deliveryAddress': deliveryAddress,
+          'paymentMethod': paymentMethod,
+          'deliveryLocation': {
+            'coordinates': coordinates,
+          },
+        }),
+      );
+
+      if (response.statusCode == 201) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+        };
+      } else {
+        final errorData = jsonDecode(response.body);
+        return {
+          'success': false,
+          'message': errorData['message'] ?? 'Failed to checkout',
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Error during checkout: $e',
+      };
     }
   }
 }

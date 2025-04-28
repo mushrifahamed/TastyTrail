@@ -60,6 +60,36 @@ const paymentService = require("../services/paymentService");
 const estimationService = require("../services/estimationService");
 const orderSplitter = require("../services/orderSplitter");
 const Order = require("../models/Order");
+const amqp = require("amqplib/callback_api");
+
+// Function to publish the order created event to RabbitMQ
+const publishOrderCreatedEvent = (orderId) => {
+  amqp.connect("amqp://localhost", (error, connection) => {
+    if (error) {
+      console.error("RabbitMQ connection error:", error);
+      return;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        console.error("RabbitMQ channel error:", error);
+        return;
+      }
+
+      const queue = "order_created_queue";
+      const msg = JSON.stringify({ orderId });
+
+      channel.assertQueue(queue, { durable: true });
+      channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
+
+      console.log(`Order Created Event Sent: ${msg}`);
+    });
+
+    setTimeout(() => {
+      connection.close();
+    }, 500);
+  });
+};
 
 // Get cart contents
 const getCart = async (req, res, next) => {
@@ -218,6 +248,8 @@ const checkoutCart = async (req, res, next) => {
     const { deliveryAddress, deliveryLocation } = req.body;
     const token = req.headers.authorization?.split(" ")[1];
 
+    console.log("checkoutCart", req.body);
+
     const cart = await Cart.findOne({ customerId });
     if (!cart || cart.items.length === 0) {
       return res.status(400).json({ message: "Cart is empty" });
@@ -251,6 +283,8 @@ const checkoutCart = async (req, res, next) => {
 
         // Calculate total amount for this restaurant's items
         const totalAmount = orderSplitter.calculateOrderTotal(restaurantItems);
+
+        console.log("rest items", restaurantItems);
 
         // Calculate estimated delivery time
         const estimatedTime = await estimationService.calculateEstimatedTime(
@@ -326,6 +360,137 @@ const checkoutCart = async (req, res, next) => {
   }
 };
 
+// Checkout items from a specific restaurant only - NEW FUNCTION
+const checkoutRestaurant = async (req, res, next) => {
+  try {
+    const customerId = req.user.id;
+    const { restaurantId, deliveryAddress, paymentMethod } = req.body;
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (!req.body.deliveryLocation || !req.body.deliveryLocation.coordinates) {
+      return res.status(400).json({
+        message: "Delivery location coordinates are required",
+      });
+    }
+
+    if (!deliveryAddress) {
+      console.log("Delivery address is required");
+      return res.status(400).json({ message: "Delivery address is required" });
+    }
+
+    // Use default delivery location if not provided
+    const deliveryLocation = req.body.deliveryLocation || { lat: 0, lng: 0 };
+
+    const cart = await Cart.findOne({ customerId });
+    if (!cart || cart.items.length === 0) {
+      return res.status(400).json({ message: "Cart is empty" });
+    }
+
+    // Filter for items only from the specified restaurant
+    const restaurantItems = cart.items.filter(
+      (item) => item.restaurantId.toString() === restaurantId.toString()
+    );
+
+    if (restaurantItems.length === 0) {
+      return res.status(400).json({
+        message: "No items found for this restaurant in your cart",
+      });
+    }
+
+    // Get customer info from user service
+    let customerInfo;
+    try {
+      customerInfo = await userService.getUserInfo(customerId, token);
+    } catch (error) {
+      console.error("Failed to get user info, using fallback data:", error);
+      customerInfo = {
+        name: "Customer",
+        phone: "Unknown",
+      };
+    }
+
+    // Calculate total amount for this restaurant's items
+    const totalAmount = orderSplitter.calculateOrderTotal(restaurantItems);
+
+    console.log("rest items", restaurantItems);
+
+    console.log("Delivery location:", deliveryLocation);
+
+    // Calculate estimated delivery time
+    const estimatedTime = await estimationService.calculateEstimatedTime(
+      restaurantItems,
+      deliveryLocation,
+      restaurantId
+    );
+
+    console.log("estimated time", estimatedTime);
+
+    // Create order for this restaurant
+    const order = new Order({
+      customerId,
+      customerInfo: {
+        name: customerInfo.name || "Customer",
+        phone: customerInfo.phone || "Unknown",
+      },
+      items: restaurantItems,
+      deliveryAddress,
+      deliveryLocation,
+      totalAmount,
+      paymentStatus: "pending",
+      paymentType: paymentMethod,
+      estimatedDeliveryTime: estimatedTime,
+      trackingStatus: "placed",
+      statusUpdates: [
+        {
+          status: "placed",
+          timestamp: Date.now(),
+          note: "Order placed successfully",
+        },
+      ],
+      restaurantId,
+    });
+
+    // Save the order
+    const savedOrder = await order.save();
+
+    // Initiate payment process for this order
+    const paymentResponse = await paymentService.createPayment(
+      savedOrder._id,
+      totalAmount,
+      customerId,
+      `Order #${savedOrder._id} for restaurant ${restaurantId}`,
+      token,
+      paymentMethod
+    );
+
+    // Update order with payment ID
+    savedOrder.paymentId = paymentResponse.paymentId;
+    await savedOrder.save();
+
+    // Publish the order created event to RabbitMQ
+    publishOrderCreatedEvent(savedOrder._id);
+
+    // IMPORTANT FIX: Remove ONLY the items from this restaurant
+    cart.items = cart.items.filter(
+      (item) => item.restaurantId.toString() !== restaurantId.toString()
+    );
+    await cart.save();
+
+    res.status(201).json({
+      message: "Order created successfully",
+      order: savedOrder,
+      payment: {
+        paymentId: paymentResponse.paymentId,
+        checkoutUrl: paymentResponse.checkoutUrl,
+        paymentParams: paymentResponse.paymentParams,
+      },
+      cart: cart,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getCart,
   addToCart,
@@ -333,6 +498,7 @@ module.exports = {
   removeFromCart,
   clearCart,
   checkoutCart,
+  checkoutRestaurant, // Export the new function
 };
 
 
@@ -347,13 +513,21 @@ const notificationService = require("../services/notificationService");
 const estimationService = require("../services/estimationService");
 const userService = require("../services/userService");
 const { RESTAURANT_SERVICE_URL } = process.env;
+<<<<<<< HEAD
 const amqp = require('amqplib/callback_api');
 
+=======
+const amqp = require("amqplib/callback_api");
+>>>>>>> main
 
 // Function to publish an event to RabbitMQ
 // Function to publish the order created event to RabbitMQ
 const publishOrderCreatedEvent = (orderId) => {
+<<<<<<< HEAD
   amqp.connect('amqp://localhost', (error, connection) => {
+=======
+  amqp.connect("amqp://localhost", (error, connection) => {
+>>>>>>> main
     if (error) {
       throw error;
     }
@@ -363,8 +537,13 @@ const publishOrderCreatedEvent = (orderId) => {
         throw error;
       }
 
+<<<<<<< HEAD
       const queue = 'order_created_queue';  // Queue name where delivery service listens
       const msg = JSON.stringify({ orderId });  // Message payload (only orderId)
+=======
+      const queue = "order_created_queue"; // Queue name where delivery service listens
+      const msg = JSON.stringify({ orderId }); // Message payload (only orderId)
+>>>>>>> main
 
       channel.assertQueue(queue, { durable: true });
       channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
@@ -388,6 +567,10 @@ const createOrder = async (req, res, next) => {
       deliveryAddress,
       deliveryLocation,
     } = req.body;
+
+    if (!deliveryAddress) {
+      return res.status(400).json({ message: "Delivery address is required" });
+    }
 
     // Ensure all items are from the same restaurant
     const restaurantIds = [
@@ -415,11 +598,13 @@ const createOrder = async (req, res, next) => {
     // Calculate total amount
     const totalAmount = orderSplitter.calculateOrderTotal(items);
 
+    console.log("Delivery location:", deliveryLocation);
+
     // Calculate estimated delivery time
     const estimatedTime = await estimationService.calculateEstimatedTime(
       items,
       deliveryLocation,
-      [restaurantId]
+      restaurantId
     );
 
     // Create the order
@@ -746,6 +931,7 @@ const updateSubOrderStatus = async (req, res, next) => {
   }
 };
 
+<<<<<<< HEAD
 
 
 // controller/orderController.js
@@ -790,6 +976,8 @@ const getAllOrders = async (req, res) => {
 };
 
 
+=======
+>>>>>>> main
 // Export all controller functions
 module.exports = {
   createOrder,
@@ -801,7 +989,10 @@ module.exports = {
   getDeliveryOrder,
   updateOrderPaymentStatus,
   updateSubOrderStatus,
+<<<<<<< HEAD
   getAllOrders,
+=======
+>>>>>>> main
 };
 
 
@@ -937,6 +1128,12 @@ const orderSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
+  paymentType: {
+    type: String,
+    enum: ["cash", "card"],
+    required: true,
+    default: "cash",
+  },
   paymentStatus: {
     type: String,
     enum: ["pending", "completed", "failed", "refunded"],
@@ -1002,6 +1199,7 @@ const {
   removeFromCart,
   clearCart,
   checkoutCart,
+  checkoutRestaurant,
 } = require("../controllers/cartController");
 const authMiddleware = require("../utils/authMiddleware");
 
@@ -1014,7 +1212,7 @@ router.post("/items", addToCart);
 router.patch("/items", updateCartItem);
 router.delete("/items/:itemId", removeFromCart);
 router.delete("/", clearCart);
-router.post("/checkout", checkoutCart);
+router.post("/checkout", checkoutRestaurant);
 
 module.exports = router;
 
@@ -1045,7 +1243,12 @@ router.get(
 );
 router.get(
   "/:id",
-  authMiddleware(["customer", "restaurant_admin", "delivery_personnel"]),
+  authMiddleware([
+    "customer",
+    "restaurant_admin",
+    "delivery_personnel",
+    "internal_service",
+  ]),
   getOrderWithSubOrders
 );
 
@@ -1103,44 +1306,46 @@ const axios = require("axios");
 const { RESTAURANT_SERVICE_URL } = process.env;
 
 module.exports = {
-  calculateEstimatedTime: async (items, deliveryLocation, restaurantIds) => {
+  calculateEstimatedTime: async (items, deliveryLocation, restaurantId) => {
+    if (!items || !Array.isArray(items)) {
+      console.log("Warning: items is undefined or not an array");
+      return { estimatedTime: 30 }; // Default value
+    }
+    if (!restaurantId) {
+      throw new Error("restaurantId is required for estimation");
+    }
+
+    console.log("Calculating estimated time for items:", items);
+    console.log("restaurantId:", restaurantId);
+
     // 1. Calculate preparation time (10 mins per item)
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
     const preparationTime = totalItems * 10; // in minutes
 
-    // 2. Get restaurant locations from restaurant service
-    const restaurantLocations = await Promise.all(
-      restaurantIds.map((id) =>
-        axios
-          .get(`${RESTAURANT_SERVICE_URL}/api/restaurants/${id}`)
-          .then((res) => res.data.address.geoCoordinates)
-      )
-    );
+    // 2. Get restaurant location from restaurant service
+    const restaurantLocation = await axios
+      .get(`${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`)
+      .then((res) => res.data.address.geoCoordinates);
 
-    // 3. Calculate average distance (simple straight-line calculation)
-    const distances = restaurantLocations.map((coords) => {
-      const [restaurantLong, restaurantLat] = coords.coordinates;
-      const [deliveryLong, deliveryLat] = deliveryLocation.coordinates;
+    // 3. Calculate distance (simple straight-line calculation)
+    const [restaurantLong, restaurantLat] = restaurantLocation.coordinates;
+    const [deliveryLong, deliveryLat] = deliveryLocation.coordinates;
 
-      // Haversine formula for distance calculation
-      const R = 6371; // Earth's radius in km
-      const dLat = ((deliveryLat - restaurantLat) * Math.PI) / 180;
-      const dLon = ((deliveryLong - restaurantLong) * Math.PI) / 180;
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos((restaurantLat * Math.PI) / 180) *
-          Math.cos((deliveryLat * Math.PI) / 180) *
-          Math.sin(dLon / 2) *
-          Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c; // Distance in km
-    });
-
-    const avgDistance =
-      distances.reduce((sum, dist) => sum + dist, 0) / distances.length;
+    // Haversine formula
+    const R = 6371; // Earth's radius in km
+    const dLat = ((deliveryLat - restaurantLat) * Math.PI) / 180;
+    const dLon = ((deliveryLong - restaurantLong) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((restaurantLat * Math.PI) / 180) *
+        Math.cos((deliveryLat * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c; // Distance in km
 
     // 4. Estimate delivery time (assuming 30 km/h average speed)
-    const travelTimeMinutes = (avgDistance / 30) * 60;
+    const travelTimeMinutes = (distance / 30) * 60;
 
     // 5. Total estimated time
     return {
@@ -1217,7 +1422,8 @@ const createPayment = async (
   amount,
   customerId,
   description,
-  token
+  token,
+  paymentMethod
 ) => {
   try {
     console.log("Creating payment with token:", token); // Debug log
@@ -1228,6 +1434,7 @@ const createPayment = async (
         amount,
         customerId,
         description,
+        paymentMethod,
       },
       {
         headers: {
