@@ -5,7 +5,6 @@ import { AuthContext } from "../../context/AuthContext";
 const Login = () => {
   const [credentials, setCredentials] = useState({
     email: "",
-    phone: "",
     password: "",
   });
   const [error, setError] = useState(null);
@@ -26,8 +25,8 @@ const Login = () => {
     setError(null);
 
     try {
-      const { email, phone, password } = credentials;
-      const response = await login({ email, phone, password });
+      const { email, password } = credentials;
+      const response = await login({ email, password });
 
       // Redirect based on role
       if (response.user.role === "admin") {
@@ -37,6 +36,7 @@ const Login = () => {
       } else {
         navigate("/");
       }
+
     } catch (err) {
       setError(err.response?.data?.message || "Login failed");
     } finally {
@@ -45,22 +45,47 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to your account
-          </h2>
+    <div
+      className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-100 to-blue-50 py-12 px-4 sm:px-6 lg:px-8"
+      style={{
+        backgroundImage: `url('https://images.unsplash.com/photo-1504674900247-0877df9cc836?ixlib=rb-4.0.3&auto=format&fit=crop&w=1350&q=80')`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundBlendMode: 'overlay',
+        backgroundColor: 'rgba(255, 255, 255, 0.7)',
+      }}
+    >
+      <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 space-y-8">
+        {/* Logo */}
+        <div className="flex justify-center">
+          <img
+            src="/TastyTrail.png"
+            alt="TastyTrail Logo"
+            className="h-30 w-auto"
+          />
         </div>
 
+        {/* Title */}
+        <div>
+          <h2 className="text-center text-3xl font-bold text-gray-900">
+            Admin Dashboard Login
+          </h2>
+          <p className="mt-2 text-center text-sm text-gray-600">
+            Sign in to manage your food ordering platform
+          </p>
+        </div>
+
+        {/* Error Message */}
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
+          <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded">
             {error}
           </div>
         )}
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="rounded-md shadow-sm space-y-4">
+        {/* Form */}
+        <form className="space-y-6" onSubmit={handleSubmit}>
+          <div className="space-y-4">
+            {/* Email Field */}
             <div>
               <label
                 htmlFor="email"
@@ -72,34 +97,17 @@ const Login = () => {
                 id="email"
                 name="email"
                 type="email"
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                required
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150"
                 value={credentials.email}
                 onChange={handleChange}
               />
             </div>
 
-            <div className="text-center">OR</div>
-
+            {/* Password Field */}
             <div>
               <label
-                htmlFor="phone"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Phone number
-              </label>
-              <input
-                id="phone"
-                name="phone"
-                type="tel"
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                value={credentials.phone}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="password"
+                For="password"
                 className="block text-sm font-medium text-gray-700"
               >
                 Password
@@ -110,13 +118,14 @@ const Login = () => {
                 type="password"
                 required
                 autoComplete="current-password"
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150"
                 value={credentials.password}
                 onChange={handleChange}
               />
             </div>
           </div>
 
+          {/* Remember Me and Forgot Password */}
           <div className="flex items-center justify-between">
             <div className="flex items-center">
               <input
@@ -136,35 +145,24 @@ const Login = () => {
             <div className="text-sm">
               <a
                 href="#"
-                className="font-medium text-blue-600 hover:text-blue-500"
+                className="font-medium text-blue-600 hover:text-blue-500 transition duration-150"
               >
                 Forgot your password?
               </a>
             </div>
           </div>
 
+          {/* Submit Button */}
           <div>
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition duration-150"
             >
               {loading ? "Signing in..." : "Sign in"}
             </button>
           </div>
         </form>
-
-        <div className="text-center text-sm">
-          <p>
-            Need restaurant admin access?{" "}
-            <a
-              href="/restaurant-admin/request"
-              className="font-medium text-blue-600 hover:text-blue-500"
-            >
-              Request access
-            </a>
-          </p>
-        </div>
       </div>
     </div>
   );

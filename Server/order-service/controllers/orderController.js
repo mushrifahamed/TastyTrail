@@ -408,6 +408,58 @@ const updateSubOrderStatus = async (req, res, next) => {
   }
 };
 
+
+
+// In orderController.js - getAllOrders
+const getAllOrders = async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 });
+
+    const ordersWithRestaurants = await Promise.all(
+      orders.map(async (order) => {
+        try {
+          const response = await axios.get(
+            `${process.env.RESTAURANT_SERVICE_URL}/api/restaurants/${order.restaurantId}`,
+            { headers: { Authorization: req.headers.authorization } }
+          );
+
+          // Properly handle the restaurant service response structure
+          const restaurantData = response.data.data?.restaurant || {
+            _id: order.restaurantId,
+            name: 'Restaurant Not Found'
+          };
+
+          return {
+            ...order.toObject(),
+            restaurant: {
+              _id: restaurantData._id,
+              name: restaurantData.name || `Restaurant ${restaurantData._id}`
+            }
+          };
+        } catch (error) {
+          console.error(`Error fetching restaurant ${order.restaurantId}:`, error.response?.data || error.message);
+          return {
+            ...order.toObject(),
+            restaurant: {
+              _id: order.restaurantId,
+              name: 'Service Unavailable'
+            }
+          };
+        }
+      })
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: { orders: ordersWithRestaurants }
+    });
+  } catch (err) {
+    console.error('Error fetching orders:', err);
+    res.status(500).json({ message: 'Error fetching orders' });
+  }
+};
+
+
 // Export all controller functions
 module.exports = {
   createOrder,
@@ -419,4 +471,5 @@ module.exports = {
   getDeliveryOrder,
   updateOrderPaymentStatus,
   updateSubOrderStatus,
+  getAllOrders,
 };

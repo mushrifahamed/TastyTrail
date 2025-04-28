@@ -125,6 +125,26 @@ const addRestaurant = async (req, res) => {
       });
     }
 
+    // Additional validation for coordinates
+    const longitude = parseFloat(address.geoCoordinates.longitude);
+    const latitude = parseFloat(address.geoCoordinates.latitude);
+    
+    if (isNaN(longitude)) {
+      return res.status(400).json({ message: "Invalid longitude value" });
+    }
+    
+    if (isNaN(latitude)) {
+      return res.status(400).json({ message: "Invalid latitude value" });
+    }
+    
+    if (longitude < -180 || longitude > 180) {
+      return res.status(400).json({ message: "Longitude must be between -180 and 180" });
+    }
+    
+    if (latitude < -90 || latitude > 90) {
+      return res.status(400).json({ message: "Latitude must be between -90 and 90" });
+    }
+
     await newRestaurant.save();
 
     res.status(201).json({
@@ -251,22 +271,77 @@ const getRestaurantAvailability = async (req, res) => {
 const getRestaurantById = async (req, res) => {
   const { id } = req.params;
 
-  // 1. Validate ObjectId
   if (!mongoose.Types.ObjectId.isValid(id)) {
+    console.error(`Invalid restaurant ID: ${id}`);
     return res.status(400).json({ 
       status: "fail",
-      message: "Invalid restaurant ID format" 
+      message: "Invalid restaurant ID format",
+      receivedId: id
     });
   }
 
   try {
-    console.log("Fetching restaurant with ID:", req.params.id); // Debugging log
-    const restaurant = await Restaurant.findById(req.params.id);
-    //console.log("Fetched restaurant:", restaurant); // Debugging log
+    const restaurant = await Restaurant.findById(id).lean();
+    
     if (!restaurant) {
-      console.log("Restaurant not found");
-      return res.status(404).json({ message: "Restaurant not found" });
-      // Debugging log
+      console.error(`Restaurant not found: ${id}`);
+      return res.status(404).json({ 
+        status: "fail",
+        message: "Restaurant not found",
+        restaurantId: id
+      });
+    }
+
+    // Ensure required fields have fallback values
+    if (!restaurant.name) {
+      console.warn(`Restaurant ${id} has no name field`);
+      restaurant.name = "Unnamed Restaurant";
+    }
+
+    res.status(200).json({ 
+      status: "success",
+      data: {
+        restaurant: {
+          _id: restaurant._id,
+          name: restaurant.name,
+          description: restaurant.description || "",
+          address: restaurant.address,
+          menu: restaurant.menu || [],
+          coverImage: restaurant.coverImage || null,
+          operatingHours: restaurant.operatingHours || { from: "09:00", to: "21:00" },
+          availability: restaurant.availability ?? true
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error(`Error fetching restaurant ${id}:`, err);
+    res.status(500).json({ 
+      status: "error",
+      message: "Server error fetching restaurant",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+};
+
+// Verify Restaurant Existence
+const verifyRestaurant = async (req, res) => {
+  const { restaurantId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+    return res.status(400).json({ 
+      status: 'fail',
+      message: 'Invalid restaurant ID format' 
+    });
+  }
+
+  try {
+    const restaurant = await Restaurant.findById(restaurantId);
+    if (!restaurant) {
+      return res.status(404).json({ 
+        status: 'fail',
+        message: 'Restaurant not found' 
+      });
     }
 
     res.status(200).json({ 
@@ -284,45 +359,6 @@ const getRestaurantById = async (req, res) => {
     res.status(500).json({ 
       status: 'error',
       message: 'Error verifying restaurant' 
-    });
-  }
-};
-
-// Verify Restaurant Existence
-const verifyRestaurant = async (req, res) => {
-  const { restaurantId } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
-    return res.status(400).json({
-      status: "fail",
-      message: "Invalid restaurant ID format",
-    });
-  }
-
-  try {
-    const restaurant = await Restaurant.findById(restaurantId);
-    if (!restaurant) {
-      return res.status(404).json({
-        status: "fail",
-        message: "Restaurant not found",
-      });
-    }
-
-    res.status(200).json({
-      status: "success",
-      data: {
-        exists: true,
-        restaurant: {
-          id: restaurant._id,
-          name: restaurant.name,
-        },
-      },
-    });
-  } catch (err) {
-    console.error("Error verifying restaurant:", err);
-    res.status(500).json({
-      status: "error",
-      message: "Error verifying restaurant",
     });
   }
 };

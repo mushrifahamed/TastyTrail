@@ -513,12 +513,21 @@ const notificationService = require("../services/notificationService");
 const estimationService = require("../services/estimationService");
 const userService = require("../services/userService");
 const { RESTAURANT_SERVICE_URL } = process.env;
+<<<<<<< HEAD
+const amqp = require('amqplib/callback_api');
+
+=======
 const amqp = require("amqplib/callback_api");
+>>>>>>> main
 
 // Function to publish an event to RabbitMQ
 // Function to publish the order created event to RabbitMQ
 const publishOrderCreatedEvent = (orderId) => {
+<<<<<<< HEAD
+  amqp.connect('amqp://localhost', (error, connection) => {
+=======
   amqp.connect("amqp://localhost", (error, connection) => {
+>>>>>>> main
     if (error) {
       throw error;
     }
@@ -528,8 +537,13 @@ const publishOrderCreatedEvent = (orderId) => {
         throw error;
       }
 
+<<<<<<< HEAD
+      const queue = 'order_created_queue';  // Queue name where delivery service listens
+      const msg = JSON.stringify({ orderId });  // Message payload (only orderId)
+=======
       const queue = "order_created_queue"; // Queue name where delivery service listens
       const msg = JSON.stringify({ orderId }); // Message payload (only orderId)
+>>>>>>> main
 
       channel.assertQueue(queue, { durable: true });
       channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
@@ -917,6 +931,53 @@ const updateSubOrderStatus = async (req, res, next) => {
   }
 };
 
+<<<<<<< HEAD
+
+
+// controller/orderController.js
+// In your OrderController.js file
+const getAllOrders = async (req, res) => {
+  try {
+    const orders = await Order.find(); // Fetch orders from the order service
+
+    // Fetch restaurant details for each order
+    const ordersWithRestaurantData = await Promise.all(orders.map(async (order) => {
+      const restaurantId = order.restaurantId; // restaurantId is just an ID in the Order model
+
+      // Fetch restaurant data using the restaurantId (make API request to the restaurant service)
+      try {
+        const restaurantResponse = await axios.get(`http://localhost:3001/api/restaurants/${restaurantId}`);
+        const restaurantData = restaurantResponse.data;
+
+        // Attach restaurant data to the order
+        return {
+          ...order.toObject(),
+          restaurant: restaurantData, // Attach the full restaurant details
+        };
+      } catch (restaurantError) {
+        console.error(`Error fetching restaurant data for order ${order._id}: `, restaurantError);
+        return {
+          ...order.toObject(),
+          restaurant: null, // In case of error, you can attach null or default data
+        };
+      }
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        orders: ordersWithRestaurantData, // return orders with restaurant details
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching orders:', err);
+    res.status(500).json({ message: 'Error fetching orders' });
+  }
+};
+
+
+=======
+>>>>>>> main
 // Export all controller functions
 module.exports = {
   createOrder,
@@ -928,6 +989,10 @@ module.exports = {
   getDeliveryOrder,
   updateOrderPaymentStatus,
   updateSubOrderStatus,
+<<<<<<< HEAD
+  getAllOrders,
+=======
+>>>>>>> main
 };
 
 
@@ -1165,6 +1230,7 @@ const {
   getDeliveryPersonOrders,
   getDeliveryOrder,
   updateOrderPaymentStatus,
+  getAllOrders,
 } = require("../controllers/orderController");
 const authMiddleware = require("../utils/authMiddleware");
 
@@ -1229,6 +1295,8 @@ router.post(
   authMiddleware(["internal_service"]),
   updateOrderPaymentStatus
 );
+
+router.get("/", authMiddleware(["restaurant_admin", "admin"]), getAllOrders); // You can modify roles as needed
 
 module.exports = router;
 
