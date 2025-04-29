@@ -9,17 +9,23 @@ exports.registerToken = async (req, res) => {
     return res.status(400).json({ message: "Missing fields" });
   }
 
+  let savedToken;
+
   const existing = await Token.findOne({ userId, role });
   if (existing) {
     existing.token = token;
     existing.updatedAt = new Date();
-    await existing.save();
+    savedToken = await existing.save();
   } else {
-    await Token.create({ userId, token, role });
+    savedToken = await Token.create({ userId, token, role });
   }
 
-  res.json({ message: "Token registered successfully" });
+  return res.json({
+    message: "Token registered successfully",
+    fcmToken: savedToken.token, // ✅ returning the actual FCM token
+  });
 };
+
 
 // Send to a specific user
 exports.sendToUser = async (req, res) => {
@@ -38,8 +44,9 @@ exports.sendToUser = async (req, res) => {
 
 // Broadcast to all users by role
 exports.broadcast = async (req, res) => {
-  const { role, title, body, data } = req.body;
+  console.log("📨 Broadcast received:", req.body); // ✅ Add this
 
+  const { role, title, body, data } = req.body;
   const users = await Token.find({ role });
   let results = [];
 

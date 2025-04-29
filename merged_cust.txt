@@ -2,7 +2,9 @@
 /* File: main.dart */
 import 'dart:convert';
 
+import 'package:client_customer/providers/order_provider.dart';
 import 'package:client_customer/screens/cart/order_confirmation_screen.dart';
+import 'package:client_customer/screens/order/order_tracking_screen.dart';
 import 'package:client_customer/screens/restaurant/restaurant_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -64,6 +66,7 @@ void main() async {
         ),
         ChangeNotifierProvider(create: (_) => CartProvider()),
         ChangeNotifierProvider(create: (_) => RestaurantProvider()),
+        ChangeNotifierProvider(create: (_) => OrderProvider()),
       ],
       child: const MyApp(),
     ),
@@ -99,6 +102,7 @@ class MyApp extends StatelessWidget {
                   restaurantId:
                       ModalRoute.of(context)!.settings.arguments as String,
                 ),
+            '/orders': (context) => const OrderTrackingScreen(),
             '/cart': (context) => const CartScreen(),
             '/checkout': (context) => const CheckoutScreen(),
             OrderConfirmationScreen.routeName: (context) {
@@ -195,6 +199,104 @@ class Cart {
 
   double get totalAmount {
     return items.fold(0, (sum, item) => sum + (item.price * item.quantity));
+  }
+}
+
+
+/* File: models\order.dart */
+// models/order.dart
+class Order {
+  final String id;
+  final String customerId;
+  final String restaurantId;
+  final String restaurantName;
+  final List<OrderItem> items;
+  final String deliveryAddress;
+  final double totalAmount;
+  final String paymentStatus;
+  final String trackingStatus;
+  final List<StatusUpdate> statusUpdates;
+  final DateTime createdAt;
+
+  Order({
+    required this.id,
+    required this.customerId,
+    required this.restaurantId,
+    required this.restaurantName,
+    required this.items,
+    required this.deliveryAddress,
+    required this.totalAmount,
+    required this.paymentStatus,
+    required this.trackingStatus,
+    required this.statusUpdates,
+    required this.createdAt,
+  });
+
+  factory Order.fromJson(Map<String, dynamic> json,
+      {String restaurantName = ''}) {
+    return Order(
+      id: json['_id'] ?? '',
+      customerId: json['customerId'] ?? '',
+      restaurantId: json['restaurantId'] ?? '',
+      restaurantName: restaurantName,
+      items: (json['items'] as List<dynamic>? ?? [])
+          .map((item) => OrderItem.fromJson(item))
+          .toList(),
+      deliveryAddress: json['deliveryAddress'] ?? '',
+      totalAmount: (json['totalAmount'] ?? 0).toDouble(),
+      paymentStatus: json['paymentStatus'] ?? 'pending',
+      trackingStatus: json['trackingStatus'] ?? 'placed',
+      statusUpdates: (json['statusUpdates'] as List<dynamic>? ?? [])
+          .map((update) => StatusUpdate.fromJson(update))
+          .toList(),
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'])
+          : DateTime.now(),
+    );
+  }
+}
+
+class OrderItem {
+  final String id;
+  final String name;
+  final double price;
+  final int quantity;
+
+  OrderItem({
+    required this.id,
+    required this.name,
+    required this.price,
+    required this.quantity,
+  });
+
+  factory OrderItem.fromJson(Map<String, dynamic> json) {
+    return OrderItem(
+      id: json['_id'] ?? '',
+      name: json['name'] ?? '',
+      price: (json['price'] ?? 0).toDouble(),
+      quantity: json['quantity'] ?? 1,
+    );
+  }
+}
+
+class StatusUpdate {
+  final String status;
+  final DateTime timestamp;
+  final String note;
+
+  StatusUpdate({
+    required this.status,
+    required this.timestamp,
+    required this.note,
+  });
+
+  factory StatusUpdate.fromJson(Map<String, dynamic> json) {
+    return StatusUpdate(
+      status: json['status'] ?? '',
+      timestamp:
+          DateTime.parse(json['timestamp'] ?? DateTime.now().toIso8601String()),
+      note: json['note'] ?? '',
+    );
   }
 }
 
@@ -642,6 +744,49 @@ class CartProvider with ChangeNotifier {
       };
     }
   }
+}
+
+
+/* File: providers\order_provider.dart */
+// providers/order_provider.dart
+import 'package:flutter/foundation.dart';
+import '../models/order.dart';
+import '../services/order_service.dart';
+
+enum OrderLoadingStatus { initial, loading, loaded, error }
+
+class OrderProvider with ChangeNotifier {
+  final OrderService _orderService = OrderService();
+
+  List<Order> _orders = [];
+  Order? _selectedOrder;
+  OrderLoadingStatus _status = OrderLoadingStatus.initial;
+  String? _errorMessage;
+
+  List<Order> get orders => _orders;
+  Order? get selectedOrder => _selectedOrder;
+  OrderLoadingStatus get status => _status;
+  String? get errorMessage => _errorMessage;
+  bool get isLoading => _status == OrderLoadingStatus.loading;
+
+  Future<void> fetchCustomerOrders() async {
+    _status = OrderLoadingStatus.loading;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      _orders = await _orderService.getCustomerOrders();
+      _status = OrderLoadingStatus.loaded;
+    } catch (e) {
+      _errorMessage = e.toString();
+      _status = OrderLoadingStatus.error;
+      _orders = [];
+    }
+
+    notifyListeners();
+  }
+
+  // Other methods omitted for brevity
 }
 
 
@@ -1261,6 +1406,254 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+
+/* File: screens\auth\profile_screen.dart */
+import 'package:client_customer/providers/auth_provider.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../theme/app_theme.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+class ProfileScreen extends StatefulWidget {
+  const ProfileScreen({Key? key}) : super(key: key);
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  Map<String, dynamic>? user;
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchUser();
+  }
+
+  Future<void> fetchUser() async {
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+    print(token);
+    if (token == null) {
+      setState(() {
+        loading = false;
+      });
+      return;
+    }
+    final response = await http.get(
+      Uri.parse('http://10.0.2.2:3000/api/users/me'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      setState(() {
+        user = data['data']['user'];
+        loading = false;
+      });
+    } else {
+      setState(() {
+        loading = false;
+      });
+    }
+  }
+
+  Future<void> logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('token');
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    if (user == null) {
+      return const Scaffold(
+        body: Center(
+          child: Text('Not logged in.', style: TextStyle(fontSize: 16)),
+        ),
+      );
+    }
+
+    final theme = AppTheme.lightTheme;
+    final primaryColor = AppColors.primary;
+    final lightPrimaryColor = AppColors.lightprime;
+
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              lightPrimaryColor,
+              Colors.white,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                children: [
+                  const SizedBox(height: 20),
+                  // Profile Avatar
+                  Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 20,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    child: CircleAvatar(
+                      radius: 50,
+                      backgroundColor: lightPrimaryColor,
+                      child: Text(
+                        user!['name'] != null && user!['name'].isNotEmpty
+                            ? user!['name'][0].toUpperCase()
+                            : '?',
+                        style: TextStyle(
+                          fontSize: 40,
+                          fontWeight: FontWeight.bold,
+                          color: primaryColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  // User Info Cards
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        _buildInfoRow(
+                          icon: Icons.person,
+                          title: 'Name',
+                          value: user!['name'] ?? 'Not set',
+                          primaryColor: primaryColor,
+                        ),
+                        const Divider(height: 20),
+                        _buildInfoRow(
+                          icon: Icons.email,
+                          title: 'Email',
+                          value: user!['email'] ?? 'Not set',
+                          primaryColor: primaryColor,
+                        ),
+                        if (user!['phone'] != null) ...[
+                          const Divider(height: 20),
+                          _buildInfoRow(
+                            icon: Icons.phone,
+                            title: 'Phone',
+                            value: user!['phone'],
+                            primaryColor: primaryColor,
+                          ),
+                        ],
+                        const Divider(height: 20),
+                        _buildInfoRow(
+                          icon: Icons.badge,
+                          title: 'Role',
+                          value: user!['role']?.toString().toUpperCase() ??
+                              'Not set',
+                          primaryColor: primaryColor,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  // Logout Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: logout,
+                      icon: const Icon(Icons.logout, color: Colors.white),
+                      label: const Text(
+                        'Logout',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 2,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow({
+    required IconData icon,
+    required String title,
+    required String value,
+    required Color primaryColor,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, color: primaryColor, size: 24),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2455,7 +2848,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       ),
                     ),
 
-                    const SizedBox(height: 100), // Space for the fixed button
+                    const SizedBox(
+                      height: 100,
+                    ), // Space for the fixed button
                   ],
                 ),
               ),
@@ -2611,10 +3006,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                   PayHere.startPayment(
                                     paymentResult['paymentObject'],
                                     (paymentId) async {
-                                      // Payment success callback
-                                      print("Payment Success: $paymentId");
+                                      print(
+                                          "[CheckoutScreen] Payment Success. PaymentId: $paymentId");
+                                      print(
+                                          "[CheckoutScreen] Original order data: $orderData");
 
-                                      // Update order status in backend
                                       final updateResult = await payhereService
                                           .savePaymentDetails(
                                         orderId: orderId,
@@ -2626,17 +3022,26 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                       if (!mounted) return;
 
                                       if (updateResult['success']) {
-                                        // Navigate to confirmation screen
+                                        final confirmationData =
+                                            Map<String, dynamic>.from(
+                                                orderData);
+                                        confirmationData['totalAmount'] =
+                                            totalAmount;
+                                        confirmationData['paymentType'] =
+                                            'Credit Card';
+                                        confirmationData['paymentStatus'] =
+                                            'completed';
+                                        confirmationData['paymentId'] =
+                                            paymentId;
+
+                                        print(
+                                            "[CheckoutScreen] Confirmation data being sent: $confirmationData");
+
                                         await Navigator.pushNamedAndRemoveUntil(
                                           context,
                                           OrderConfirmationScreen.routeName,
                                           (route) => false,
-                                          arguments: {
-                                            ...orderData,
-                                            'paymentStatus': 'completed',
-                                            'paymentId': paymentId,
-                                            'paymentType': 'Credit Card',
-                                          },
+                                          arguments: confirmationData,
                                         );
                                       } else {
                                         ScaffoldMessenger.of(context)
@@ -2817,7 +3222,7 @@ class OrderConfirmationScreen extends StatelessWidget {
                       const Divider(),
                       _buildOrderDetail('Order ID', orderData['_id'] ?? 'N/A'),
                       _buildOrderDetail('Total Amount',
-                          '\$${(orderData['totalAmount'] ?? 0) / 100}'),
+                          '\$${(orderData['totalAmount'] ?? 0).toStringAsFixed(2)}'),
                       _buildOrderDetail(
                           'Payment Method', orderData['paymentType'] ?? 'N/A'),
                     ],
@@ -2884,13 +3289,89 @@ class OrderConfirmationScreen extends StatelessWidget {
 
 /* File: screens\home\home_screen.dart */
 // lib/screens/home/home_screen.dart
+import 'package:client_customer/screens/order/order_tracking_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import '../../models/restaurant.dart';
 import '../../providers/restaurant_provider.dart';
 import '../../theme/app_theme.dart';
 import '../cart/cart_screen.dart';
+import '../auth/profile_screen.dart';
+import '../location_picker_screen.dart';
+
+mixin ImageBuilderMixin {
+  // Updated base URL to include the restaurant service
+  final String _baseImageUrl = 'http://10.0.2.2:3001/';
+
+  Widget _buildImage(String? imagePath,
+      {double? width, double? height, BoxFit fit = BoxFit.cover}) {
+    if (imagePath == null || imagePath.isEmpty) {
+      return _buildPlaceholder(width: width, height: height);
+    }
+
+    // Handle absolute URLs (like Unsplash)
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      return _networkImage(imagePath, width: width, height: height, fit: fit);
+    }
+
+    // Handle local backend images
+    return _serverImage(imagePath, width: width, height: height, fit: fit);
+  }
+
+  Widget _serverImage(String path,
+      {double? width, double? height, BoxFit? fit}) {
+    // Clean up the path to ensure proper URL construction
+    String cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    final fullUrl = _baseImageUrl + cleanPath;
+
+    print('Loading image from: $fullUrl'); // Debug log
+    return _networkImage(fullUrl, width: width, height: height, fit: fit);
+  }
+
+  Widget _networkImage(String url,
+      {double? width, double? height, BoxFit? fit}) {
+    return Image.network(
+      url,
+      width: width,
+      height: height,
+      fit: fit,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return _buildLoadingPlaceholder(width: width, height: height);
+      },
+      errorBuilder: (context, error, stackTrace) {
+        print('Image load error: $error');
+        return _buildPlaceholder(width: width, height: height);
+      },
+    );
+  }
+
+  Widget _buildPlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      child: const Icon(Icons.restaurant, size: 40, color: Colors.grey),
+    );
+  }
+
+  Widget _buildLoadingPlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      child: Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+        ),
+      ),
+    );
+  }
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -2899,21 +3380,96 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with ImageBuilderMixin {
   int _selectedIndex = 0;
+  LatLng? _selectedLocation;
+  bool _isGettingLocation = false;
 
   @override
   void initState() {
     super.initState();
-    _loadRestaurants();
+    _getCurrentLocation();
   }
 
-  Future<void> _loadRestaurants() async {
-    // In a real app, you would get the user's location
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isGettingLocation = true;
+    });
+
+    try {
+      // Check location permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permissions are denied');
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permissions are permanently denied');
+      }
+
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition();
+      setState(() {
+        _selectedLocation = LatLng(position.latitude, position.longitude);
+      });
+
+      // Load restaurants based on current location
+      await Provider.of<RestaurantProvider>(
+        context,
+        listen: false,
+      ).fetchNearbyRestaurants(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        radius: 5,
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: ${e.toString()}')),
+      );
+      // Load with default location if there's an error
+      await _loadRestaurantsWithDefaultLocation();
+    } finally {
+      setState(() {
+        _isGettingLocation = false;
+      });
+    }
+  }
+
+  Future<void> _loadRestaurantsWithDefaultLocation() async {
     await Provider.of<RestaurantProvider>(
       context,
       listen: false,
-    ).fetchNearbyRestaurants(latitude: 12.9716, longitude: 77.5946, radius: 5);
+    ).fetchNearbyRestaurants(latitude: 6.9271, longitude: 79.8612, radius: 5);
+  }
+
+  Future<void> _openLocationPicker() async {
+    final LatLng? result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LocationPickerScreen(
+          initialLocation: _selectedLocation,
+        ),
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        _selectedLocation = result;
+      });
+
+      // Load restaurants based on selected location
+      await Provider.of<RestaurantProvider>(
+        context,
+        listen: false,
+      ).fetchNearbyRestaurants(
+        latitude: result.latitude,
+        longitude: result.longitude,
+        radius: 5,
+      );
+    }
   }
 
   void _onItemTapped(int index) {
@@ -2926,7 +3482,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: _selectedIndex == 0 ? _buildHomeContent() : const CartScreen(),
+      body: _getSelectedScreen(),
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
@@ -2934,12 +3490,41 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.shopping_cart),
             label: 'Cart',
           ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.delivery_dining),
+            label: 'Orders',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person),
+            label: 'Profile',
+          ),
         ],
         currentIndex: _selectedIndex,
         selectedItemColor: AppColors.primary,
+        unselectedItemColor: Colors.grey, // Set unselected items to white
+        backgroundColor: Colors.white, // Optional: set navbar background
+        type:
+            BottomNavigationBarType.fixed, // Recommended for more than 3 items
+        showSelectedLabels: true,
+        showUnselectedLabels: true,
         onTap: _onItemTapped,
       ),
     );
+  }
+
+  Widget _getSelectedScreen() {
+    switch (_selectedIndex) {
+      case 0:
+        return _buildHomeContent();
+      case 1:
+        return const CartScreen();
+      case 2:
+        return const OrderTrackingScreen();
+      case 3:
+        return const ProfileScreen();
+      default:
+        return _buildHomeContent();
+    }
   }
 
   Widget _buildHomeContent() {
@@ -2987,6 +3572,48 @@ class _HomeScreenState extends State<HomeScreen> {
                       fontWeight: FontWeight.w400,
                     ),
               ),
+              SizedBox(height: 16.h),
+              // Add location buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed:
+                          _isGettingLocation ? null : _getCurrentLocation,
+                      icon: const Icon(Icons.my_location),
+                      label: _isGettingLocation
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : const Text('Current Location'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: AppColors.primary,
+                        padding: EdgeInsets.symmetric(vertical: 10.h),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 8.w),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _openLocationPicker,
+                      icon: const Icon(Icons.map),
+                      label: const Text('Select on Map'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: AppColors.primary,
+                        padding: EdgeInsets.symmetric(vertical: 10.h),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -3006,7 +3633,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text('Error: ${restaurantProvider.errorMessage}'),
                       SizedBox(height: 16.h),
                       ElevatedButton(
-                        onPressed: _loadRestaurants,
+                        onPressed: _getCurrentLocation,
                         child: const Text('Retry'),
                       ),
                     ],
@@ -3025,7 +3652,7 @@ class _HomeScreenState extends State<HomeScreen> {
               );
 
               return RefreshIndicator(
-                onRefresh: _loadRestaurants,
+                onRefresh: _getCurrentLocation,
                 child: ListView.builder(
                   padding: EdgeInsets.symmetric(
                     horizontal: 16.w,
@@ -3055,11 +3682,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _RestaurantCard extends StatelessWidget {
+class _RestaurantCard extends StatelessWidget with ImageBuilderMixin {
   final Restaurant restaurant;
   final VoidCallback onTap;
 
-  const _RestaurantCard({required this.restaurant, required this.onTap});
+  _RestaurantCard({required this.restaurant, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -3069,22 +3696,16 @@ class _RestaurantCard extends StatelessWidget {
         margin: EdgeInsets.only(bottom: 28.h),
         child: Column(
           children: [
-            // Cover image, full width, curved top
             ClipRRect(
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(28.r),
                 topRight: Radius.circular(28.r),
               ),
-              child: Image.network(
+              child: _buildImage(
                 restaurant.coverImage,
                 width: double.infinity,
                 height: 170.h,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  height: 170.h,
-                  color: Colors.grey[200],
-                  child: const Icon(Icons.restaurant, size: 40),
-                ),
               ),
             ),
             // Details tile, full width, curved bottom
@@ -3601,12 +4222,436 @@ class Onboarding3Screen extends StatelessWidget {
 }
 
 
+/* File: screens\order\order_tracking_screen.dart */
+// screens/order/order_tracking_screen.dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
+import '../../providers/order_provider.dart';
+import '../../models/order.dart';
+import '../../theme/app_theme.dart';
+import '../order/order_tracking_screen.dart';
+
+class OrderTrackingScreen extends StatefulWidget {
+  const OrderTrackingScreen({Key? key}) : super(key: key);
+
+  @override
+  _OrderTrackingScreenState createState() => _OrderTrackingScreenState();
+}
+
+class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<OrderProvider>(context, listen: false).fetchCustomerOrders();
+    });
+  }
+
+  // Convert tracking status to more readable format
+  String getStatusText(String status) {
+    switch (status) {
+      case 'placed':
+        return 'Order Placed';
+      case 'confirmed':
+        return 'Order Confirmed';
+      case 'preparing':
+        return 'Preparing';
+      case 'ready_for_pickup':
+        return 'Ready for Pickup';
+      case 'out_for_delivery':
+        return 'Out for Delivery';
+      case 'delivered':
+        return 'Delivered';
+      case 'cancelled':
+        return 'Cancelled';
+      default:
+        return status;
+    }
+  }
+
+  // Return an appropriate icon for the status
+  IconData getStatusIcon(String status) {
+    switch (status) {
+      case 'placed':
+        return Icons.receipt_long;
+      case 'confirmed':
+        return Icons.check_circle;
+      case 'preparing':
+        return Icons.restaurant;
+      case 'ready_for_pickup':
+        return Icons.delivery_dining;
+      case 'out_for_delivery':
+        return Icons.directions_bike;
+      case 'delivered':
+        return Icons.home;
+      case 'cancelled':
+        return Icons.cancel;
+      default:
+        return Icons.help;
+    }
+  }
+
+  // Get a color based on the status
+  Color getStatusColor(String status) {
+    switch (status) {
+      case 'placed':
+        return Colors.blue;
+      case 'confirmed':
+        return Colors.green;
+      case 'preparing':
+        return Colors.yellow;
+      case 'ready_for_pickup':
+        return Colors.purple;
+      case 'out_for_delivery':
+        return Colors.indigo;
+      case 'delivered':
+        return Colors.teal;
+      case 'cancelled':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('My Orders'),
+        centerTitle: true,
+        elevation: 0,
+        backgroundColor: Colors.white,
+      ),
+      body: Consumer<OrderProvider>(
+        builder: (context, orderProvider, child) {
+          if (orderProvider.isLoading) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
+
+          if (orderProvider.errorMessage != null) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: Colors.red[300],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Error: ${orderProvider.errorMessage}',
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: () => orderProvider.fetchCustomerOrders(),
+                    child: const Text('Try Again'),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          if (orderProvider.orders.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.receipt_long,
+                    size: 80,
+                    color: Colors.grey[400],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No orders yet',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Your order history will appear here',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pushNamed(context, '/home'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 16,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Order Food'),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // Display the list of orders
+          return RefreshIndicator(
+            onRefresh: () => orderProvider.fetchCustomerOrders(),
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: orderProvider.orders.length,
+              itemBuilder: (context, index) {
+                final order = orderProvider.orders[index];
+                return _buildOrderCard(context, order);
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildOrderCard(BuildContext context, Order order) {
+    final dateFormat = DateFormat('MMM d, y • h:mm a');
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      color: const Color.fromARGB(255, 255, 240, 215),
+      child: InkWell(
+        onTap: () {
+          // Navigate to order details
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Order ID and Date
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Order #${order.id.substring(order.id.length - 8)}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Text(
+                    dateFormat.format(order.createdAt),
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+
+              const Divider(height: 24),
+
+              // Restaurant name
+              Row(
+                children: [
+                  Icon(Icons.restaurant, color: Colors.grey[600], size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    order.restaurantName,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
+              // Order summary
+              Text(
+                '${order.items.length} item${order.items.length > 1 ? 's' : ''} • \$${order.totalAmount.toStringAsFixed(2)}',
+                style: TextStyle(
+                  color: Colors.grey[700],
+                  fontSize: 14,
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Status
+              Row(
+                children: [
+                  Icon(
+                    getStatusIcon(order.trackingStatus),
+                    color: getStatusColor(order.trackingStatus),
+                    size: 24,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    getStatusText(order.trackingStatus),
+                    style: TextStyle(
+                      color: getStatusColor(order.trackingStatus),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+
+              // Progress indicator for active orders
+              if (order.trackingStatus != 'delivered' &&
+                  order.trackingStatus != 'cancelled')
+                _buildOrderProgressIndicator(order.trackingStatus),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrderProgressIndicator(String status) {
+    // Define the order status sequence
+    final orderStatuses = [
+      'placed',
+      'confirmed',
+      'preparing',
+      'ready_for_pickup',
+      'out_for_delivery',
+      'delivered'
+    ];
+
+    // Find the current status index
+    final currentIndex = orderStatuses.indexOf(status);
+
+    // If the status is not in our defined sequence, return empty container
+    if (currentIndex == -1) return Container();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        LinearProgressIndicator(
+          value: (currentIndex + 1) / orderStatuses.length,
+          backgroundColor: Colors.grey[300],
+          valueColor: AlwaysStoppedAnimation<Color>(
+            getStatusColor(status),
+          ),
+          minHeight: 8,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Placed',
+              style: TextStyle(fontSize: 12),
+            ),
+            Text(
+              'Delivered',
+              style: TextStyle(
+                fontSize: 12,
+                color: currentIndex == orderStatuses.length - 1
+                    ? Colors.teal
+                    : Colors.grey,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+
 /* File: screens\restaurant\restaurant_screen.dart */
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/restaurant.dart';
 import '../../providers/cart_provider.dart';
 import '../../providers/restaurant_provider.dart';
+
+mixin ImageBuilderMixin {
+  final String _baseImageUrl = 'http://10.0.2.2:3001/';
+
+  Widget buildImage(String? imagePath,
+      {double? width, double? height, BoxFit fit = BoxFit.cover}) {
+    if (imagePath == null || imagePath.isEmpty) {
+      return _buildPlaceholder(width: width, height: height);
+    }
+
+    // Handle absolute URLs (like Unsplash)
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      return _networkImage(imagePath, width: width, height: height, fit: fit);
+    }
+
+    // Handle local backend images - clean up the path
+    String cleanPath = imagePath
+        .replaceAll(
+            '\\', '/') // Replace Windows backslashes with forward slashes
+        .replaceAll('/uploads/', ''); // Remove any 'uploads/' prefix if present
+
+    return _serverImage(cleanPath, width: width, height: height, fit: fit);
+  }
+
+  Widget _serverImage(String path,
+      {double? width, double? height, BoxFit? fit}) {
+    final fullUrl = _baseImageUrl + path;
+    print('Loading image from: $fullUrl'); // Debug log
+    return _networkImage(fullUrl, width: width, height: height, fit: fit);
+  }
+
+  Widget _networkImage(String url,
+      {double? width, double? height, BoxFit? fit}) {
+    return Image.network(
+      url,
+      width: width,
+      height: height,
+      fit: fit,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return _buildLoadingPlaceholder(width: width, height: height);
+      },
+      errorBuilder: (context, error, stackTrace) {
+        print('Image load error: $error');
+        return _buildPlaceholder(width: width, height: height);
+      },
+    );
+  }
+
+  Widget _buildPlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      child: const Icon(Icons.restaurant, size: 40, color: Colors.grey),
+    );
+  }
+
+  Widget _buildLoadingPlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      child: const Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+        ),
+      ),
+    );
+  }
+}
 
 class RestaurantDetailScreen extends StatefulWidget {
   final String restaurantId;
@@ -3620,7 +4665,8 @@ class RestaurantDetailScreen extends StatefulWidget {
   State<RestaurantDetailScreen> createState() => _RestaurantDetailScreenState();
 }
 
-class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
+class _RestaurantDetailScreenState extends State<RestaurantDetailScreen>
+    with ImageBuilderMixin {
   bool _isLoading = true;
   Restaurant? _restaurant;
   String? _error;
@@ -3732,19 +4778,12 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
             ),
           ),
         ),
-        background: _restaurant!.coverImage.isNotEmpty
-            ? Image.network(
-                _restaurant!.coverImage,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: Colors.grey[300],
-                  child: const Icon(Icons.restaurant, size: 50),
-                ),
-              )
-            : Container(
-                color: Colors.grey[300],
-                child: const Icon(Icons.restaurant, size: 50),
-              ),
+        background: buildImage(
+          _restaurant!.coverImage,
+          width: double.infinity,
+          height: double.infinity,
+          fit: BoxFit.cover,
+        ),
       ),
     );
   }
@@ -3807,19 +4846,12 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
               child: SizedBox(
                 width: 80,
                 height: 80,
-                child: menuItem.image.isNotEmpty
-                    ? Image.network(
-                        menuItem.image,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          color: Colors.grey[300],
-                          child: const Icon(Icons.restaurant),
-                        ),
-                      )
-                    : Container(
-                        color: Colors.grey[300],
-                        child: const Icon(Icons.restaurant),
-                      ),
+                child: buildImage(
+                  menuItem.image,
+                  width: 80,
+                  height: 80,
+                  fit: BoxFit.cover,
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -4602,6 +5634,79 @@ class CartService {
 }
 
 
+/* File: services\order_service.dart */
+// services/order_service.dart
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../models/order.dart';
+import 'auth_service.dart';
+import 'restaurant_service.dart';
+
+class OrderService {
+  final String baseUrl = 'http://10.0.2.2:3002'; // Order service URL
+  final AuthService _authService = AuthService();
+  final RestaurantService _restaurantService = RestaurantService();
+
+  // Get orders for the current customer
+  Future<List<Order>> getCustomerOrders() async {
+    try {
+      final token = await _authService.getToken();
+      final user = await _authService.getUser();
+
+      if (token == null || user == null) {
+        throw Exception('Authentication required');
+      }
+
+      final userId = user['_id'];
+
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/orders/customer/$userId'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to load orders: ${response.statusCode}');
+      }
+
+      final List<dynamic> ordersJson = jsonDecode(response.body);
+      final List<Order> orders = [];
+
+      // Get restaurant details for each order
+      for (var orderJson in ordersJson) {
+        final restaurantId = orderJson['restaurantId'];
+        String restaurantName = 'Restaurant';
+
+        try {
+          final restaurant =
+              await _restaurantService.getRestaurantById(restaurantId);
+
+          print('restaurant: $restaurant');
+          restaurantName = restaurant.name;
+        } catch (e) {
+          print('Error fetching restaurant: $e');
+        }
+
+        orders.add(Order.fromJson(orderJson, restaurantName: restaurantName));
+      }
+
+      return orders;
+    } catch (e) {
+      print('Error fetching orders: $e');
+      throw Exception('Failed to load orders: $e');
+    }
+  }
+
+  // // Get a specific order by ID
+  // Future<Order> getOrderDetails(String orderId) async {
+  //   // Implementation similar to getCustomerOrders but for a single order
+  //   // Omitted for brevity
+  // }
+}
+
+
 /* File: services\payhere_service.dart */
 // services/payhere_service.dart
 import 'dart:convert';
@@ -4776,6 +5881,8 @@ class RestaurantService {
     );
 
     if (response.statusCode == 200) {
+      print('Restaurant API response received');
+      print('Response body: ${response.body}');
       return Restaurant.fromJson(json.decode(response.body));
     } else {
       throw Exception('Failed to load restaurant: ${response.body}');
@@ -4827,6 +5934,7 @@ class AppColors {
   static const text = Color(0xFF111827);
   static const muted = Color(0xFF6B7280);
   static const border = Color(0xFFE5E7EB);
+  static const lightprime = Color.fromARGB(255, 255, 226, 176); // Shadow color
 }
 
 class AppTheme {
@@ -4937,15 +6045,15 @@ class NetworkException extends AppException {
 
 
 /* File: utils\constants.dart */
-// lib/utils/constants.dart
 class ApiConstants {
   static const String baseUrl = 'http://10.0.2.2:3001/api';
+
   static const String userBaseUrl = 'http://10.0.2.2:3000/api/users';
   static const String restaurantBaseUrl =
       'http://10.0.2.2:3001/api/restaurants';
+
   static const String cartBaseUrl = 'http://10.0.2.2:3001/api/cart';
 }
-
 class AppConstants {
   static const double defaultPadding = 16.0;
   static const double borderRadius = 8.0;

@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  delivery-service:
+    build:
+      context: ./delivery-service
+    ports:
+      - "5050:3008"
+    working_dir: /app
+    volumes:
+      - ./delivery-service:/app
+    command: npm start
+    env_file:
+      - ./delivery-service/.env
+    restart: unless-stopped
+    depends_on:
+      - rabbitmq
+
+  notification-service:
+    build:
+      context: ./notification-service
+    ports:
+      - "5051:3005"
+    working_dir: /app
+    volumes:
+      - ./notification-service:/app
+    command: npm start
+    env_file:
+      - ./notification-service/.env
+    restart: unless-stopped
+    depends_on:
+      - rabbitmq
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"    # AMQP port for services
+      - "15672:15672"  # Management UI (Dashboard)
+    restart: unless-stopped
+
+
+  order-service:
+    build:
+      context: ./order-service
+    ports:
+      - "5052:3002"
+    working_dir: /app
+    volumes:
+      - ./order-service:/app
+    command: npm start
+    env_file:
+      - ./order-service/.env
+    restart: unless-stopped
+
+  payment-service:
+    build:
+      context: ./payment-service
+    ports:
+      - "5053:3003"
+    working_dir: /app
+    volumes:
+      - ./payment-service:/app
+    command: npm start
+    env_file:
+      - ./payment-service/.env
+    restart: unless-stopped
+
+  restaurant-service:
+    build:
+      context: ./restaurant-service
+    ports:
+      - "5054:3001"
+    working_dir: /app
+    volumes:
+      - ./restaurant-service:/app
+    command: npm start
+    env_file:
+      - ./restaurant-service/.env
+    restart: unless-stopped
+
+  user-service:
+    build:
+      context: ./user-service
+    ports:
+      - "5055:3000"
+    working_dir: /app
+    volumes:
+      - ./user-service:/app
+    command: npm start
+    env_file:
+      - ./user-service/.env
+    restart: unless-stopped
+  

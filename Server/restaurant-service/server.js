@@ -24,6 +24,8 @@ app.use(express.json()); // Parse JSON request bodies
 app.use(cors()); // Enable cross-origin requests
 app.use(rateLimiter); // Apply rate limiting
 
+app.use("/uploads", express.static("uploads"));
+
 // Routes
 app.use("/api/restaurants", restaurantRoutes);
 
