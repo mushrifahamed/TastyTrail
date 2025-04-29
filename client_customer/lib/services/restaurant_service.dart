@@ -54,6 +54,8 @@ class RestaurantService {
     );
 
     if (response.statusCode == 200) {
+      print('Restaurant API response received');
+      print('Response body: ${response.body}');
       return Restaurant.fromJson(json.decode(response.body));
     } else {
       throw Exception('Failed to load restaurant: ${response.body}');

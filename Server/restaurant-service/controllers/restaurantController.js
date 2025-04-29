@@ -1,6 +1,6 @@
 const axios = require("axios");
-const mongoose = require('mongoose');
-const path = require('path');
+const mongoose = require("mongoose");
+const path = require("path");
 const Restaurant = require("../models/restaurantModel");
 const { calculateDistance } = require("../utils/geolocation");
 const upload = require("../config/multerConfig");
@@ -166,41 +166,109 @@ const getNearbyRestaurants = async (req, res) => {
   const { longitude, latitude, radius } = req.query;
 
   try {
-    // Perform the geospatial query to find nearby restaurants
-    const nearbyRestaurants = await Restaurant.aggregate([
-      {
-        $geoNear: {
-          near: {
-            type: "Point",
-            coordinates: [parseFloat(longitude), parseFloat(latitude)],
+    // Check if valid coordinates are provided
+    const isValidCoordinates =
+      longitude &&
+      latitude &&
+      !isNaN(parseFloat(longitude)) &&
+      !isNaN(parseFloat(latitude));
+
+    if (isValidCoordinates) {
+      // Try to get nearby restaurants first with distance filter
+      let restaurants = await Restaurant.aggregate([
+        {
+          $geoNear: {
+            near: {
+              type: "Point",
+              coordinates: [parseFloat(longitude), parseFloat(latitude)],
+            },
+            distanceField: "distance",
+            maxDistance: parseFloat(radius) * 1000, // Convert to meters
+            spherical: true,
+            includeLocs: "address.geoCoordinates",
           },
-          distanceField: "distance", // Ensure this is added
-          maxDistance: radius * 1000,
-          spherical: true,
-          includeLocs: "address.geoCoordinates", // Include coordinates
         },
-      },
-      {
-        $project: {
+        {
+          $project: {
+            name: 1,
+            description: 1,
+            coverImage: 1,
+            menu: 1,
+            availability: 1,
+            operatingHours: 1,
+            distance: 1,
+          },
+        },
+      ]);
+
+      // If no nearby restaurants found, get all restaurants with distance calculation
+      // This maintains the same format as nearby restaurants
+      if (restaurants.length === 0) {
+        console.log(
+          "No nearby restaurants found, getting all restaurants with distance"
+        );
+        restaurants = await Restaurant.aggregate([
+          {
+            $geoNear: {
+              near: {
+                type: "Point",
+                coordinates: [parseFloat(longitude), parseFloat(latitude)],
+              },
+              distanceField: "distance",
+              // No maxDistance filter here - return all restaurants
+              spherical: true,
+              includeLocs: "address.geoCoordinates",
+            },
+          },
+          {
+            $project: {
+              name: 1,
+              description: 1,
+              coverImage: 1,
+              menu: 1,
+              availability: 1,
+              operatingHours: 1,
+              distance: 1,
+            },
+          },
+        ]);
+      }
+
+      if (restaurants.length === 0) {
+        return res.status(404).json({ message: "No restaurants found" });
+      }
+
+      return res.status(200).json(restaurants);
+    } else {
+      // If coordinates are not valid, just return all restaurants without distance
+      const allRestaurants = await Restaurant.find(
+        {},
+        {
           name: 1,
           description: 1,
           coverImage: 1,
           menu: 1,
           availability: 1,
-          operatingHours: 1, // Explicitly include
-          distance: 1, // Include calculated distance
-        },
-      },
-    ]);
+          operatingHours: 1,
+        }
+      );
 
-    if (nearbyRestaurants.length === 0) {
-      return res.status(404).json({ message: "No nearby restaurants found" });
+      if (allRestaurants.length === 0) {
+        return res.status(404).json({ message: "No restaurants found" });
+      }
+
+      // Add null distance field for format consistency
+      const formattedRestaurants = allRestaurants.map((restaurant) => {
+        const restaurantObj = restaurant.toObject();
+        restaurantObj.distance = null;
+        return restaurantObj;
+      });
+
+      return res.status(200).json(formattedRestaurants);
     }
-
-    res.status(200).json(nearbyRestaurants);
   } catch (err) {
-    console.error("Error fetching nearby restaurants:", err);
-    res.status(500).json({ message: "Error fetching nearby restaurants", err });
+    console.error("Error fetching restaurants:", err);
+    res.status(500).json({ message: "Error fetching restaurants", err });
   }
 };
 
@@ -253,9 +321,9 @@ const getRestaurantById = async (req, res) => {
 
   // 1. Validate ObjectId
   if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       status: "fail",
-      message: "Invalid restaurant ID format" 
+      message: "Invalid restaurant ID format",
     });
   }
 
@@ -269,21 +337,23 @@ const getRestaurantById = async (req, res) => {
       // Debugging log
     }
 
-    res.status(200).json({ 
-      status: 'success',
+    console.log("Restaurant found:", restaurant); // Debugging log
+
+    res.status(200).json({
+      status: "success",
       data: {
         exists: true,
         restaurant: {
           id: restaurant._id,
-          name: restaurant.name
-        }
-      }
+          name: restaurant.name,
+        },
+      },
     });
   } catch (err) {
-    console.error('Error verifying restaurant:', err);
-    res.status(500).json({ 
-      status: 'error',
-      message: 'Error verifying restaurant' 
+    console.error("Error verifying restaurant:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Error verifying restaurant",
     });
   }
 };
@@ -354,15 +424,17 @@ const addMenuItem = async (req, res) => {
   try {
     const { restaurantId } = req.params;
     const menuItem = req.body;
-    const menuItemImage = req.file ? 
-      path.join('uploads', 'menu-items', req.file.filename).replace(/\\/g, '/') : 
-      null;
+    const menuItemImage = req.file
+      ? path
+          .join("uploads", "menu-items", req.file.filename)
+          .replace(/\\/g, "/")
+      : null;
 
     // Validate required fields
     if (!menuItem.name || !menuItem.price) {
       return res.status(400).json({
         status: "fail",
-        message: "Name and price are required for menu items"
+        message: "Name and price are required for menu items",
       });
     }
 
@@ -370,7 +442,7 @@ const addMenuItem = async (req, res) => {
     if (!restaurant) {
       return res.status(404).json({
         status: "fail",
-        message: "Restaurant not found"
+        message: "Restaurant not found",
       });
     }
 
@@ -378,7 +450,7 @@ const addMenuItem = async (req, res) => {
       ...menuItem,
       _id: new mongoose.Types.ObjectId(),
       image: menuItemImage,
-      price: parseFloat(menuItem.price)
+      price: parseFloat(menuItem.price),
     };
 
     restaurant.menu.push(newItem);
@@ -387,16 +459,16 @@ const addMenuItem = async (req, res) => {
     return res.status(201).json({
       status: "success",
       data: {
-        menuItem: updatedRestaurant.menu.slice(-1)[0]
-      }
+        menuItem: updatedRestaurant.menu.slice(-1)[0],
+      },
     });
   } catch (err) {
-    console.error('Error in addMenuItem:', err);
+    console.error("Error in addMenuItem:", err);
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
       error: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
     });
   }
 };
@@ -406,15 +478,17 @@ const updateMenuItem = async (req, res) => {
   try {
     const { restaurantId, menuItemId } = req.params;
     const menuItem = req.body;
-    const menuItemImage = req.file ? 
-      path.join('uploads', 'menu-items', req.file.filename).replace(/\\/g, '/') : 
-      null;
+    const menuItemImage = req.file
+      ? path
+          .join("uploads", "menu-items", req.file.filename)
+          .replace(/\\/g, "/")
+      : null;
 
     // Validate required fields
     if (!menuItem.name || !menuItem.price) {
       return res.status(400).json({
         status: "fail",
-        message: "Name and price are required for menu items"
+        message: "Name and price are required for menu items",
       });
     }
 
@@ -422,15 +496,17 @@ const updateMenuItem = async (req, res) => {
     if (!restaurant) {
       return res.status(404).json({
         status: "fail",
-        message: "Restaurant not found"
+        message: "Restaurant not found",
       });
     }
 
-    const itemIndex = restaurant.menu.findIndex(item => item._id.toString() === menuItemId);
+    const itemIndex = restaurant.menu.findIndex(
+      (item) => item._id.toString() === menuItemId
+    );
     if (itemIndex === -1) {
       return res.status(404).json({
         status: "fail",
-        message: "Menu item not found"
+        message: "Menu item not found",
       });
     }
 
@@ -438,23 +514,23 @@ const updateMenuItem = async (req, res) => {
       ...restaurant.menu[itemIndex],
       ...menuItem,
       price: parseFloat(menuItem.price),
-      image: menuItemImage || restaurant.menu[itemIndex].image
+      image: menuItemImage || restaurant.menu[itemIndex].image,
     };
 
     const updatedRestaurant = await restaurant.save();
     return res.status(200).json({
       status: "success",
       data: {
-        menuItem: updatedRestaurant.menu[itemIndex]
-      }
+        menuItem: updatedRestaurant.menu[itemIndex],
+      },
     });
   } catch (err) {
-    console.error('Error in updateMenuItem:', err);
+    console.error("Error in updateMenuItem:", err);
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
       error: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
     });
   }
 };
@@ -468,32 +544,34 @@ const deleteMenuItem = async (req, res) => {
     if (!restaurant) {
       return res.status(404).json({
         status: "fail",
-        message: "Restaurant not found"
+        message: "Restaurant not found",
       });
     }
 
     const initialLength = restaurant.menu.length;
-    restaurant.menu = restaurant.menu.filter(item => item._id.toString() !== menuItemId);
-    
+    restaurant.menu = restaurant.menu.filter(
+      (item) => item._id.toString() !== menuItemId
+    );
+
     if (restaurant.menu.length === initialLength) {
       return res.status(404).json({
         status: "fail",
-        message: "Menu item not found"
+        message: "Menu item not found",
       });
     }
 
     await restaurant.save();
     return res.status(204).json({
       status: "success",
-      data: null
+      data: null,
     });
   } catch (err) {
-    console.error('Error in deleteMenuItem:', err);
+    console.error("Error in deleteMenuItem:", err);
     return res.status(500).json({
       status: "error",
       message: "Internal server error",
       error: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
     });
   }
 };

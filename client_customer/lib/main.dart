@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import 'package:client_customer/providers/order_provider.dart';
 import 'package:client_customer/screens/cart/order_confirmation_screen.dart';
+import 'package:client_customer/screens/order/order_tracking_screen.dart';
 import 'package:client_customer/screens/restaurant/restaurant_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -62,6 +64,7 @@ void main() async {
         ),
         ChangeNotifierProvider(create: (_) => CartProvider()),
         ChangeNotifierProvider(create: (_) => RestaurantProvider()),
+        ChangeNotifierProvider(create: (_) => OrderProvider()),
       ],
       child: const MyApp(),
     ),
@@ -97,6 +100,7 @@ class MyApp extends StatelessWidget {
                   restaurantId:
                       ModalRoute.of(context)!.settings.arguments as String,
                 ),
+            '/orders': (context) => const OrderTrackingScreen(),
             '/cart': (context) => const CartScreen(),
             '/checkout': (context) => const CheckoutScreen(),
             OrderConfirmationScreen.routeName: (context) {
