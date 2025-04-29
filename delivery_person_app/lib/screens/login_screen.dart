@@ -1,10 +1,12 @@
+import 'dart:convert';
+
 import 'package:delivery_person_app/screens/DashboardScreen.dart';
 import 'package:delivery_person_app/screens/HomeScreen.dart';
 import 'package:delivery_person_app/screens/SignupScreen.dart';
+import 'package:delivery_person_app/services/ApiService.dart';
 import 'package:flutter/material.dart';
-
-
-
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -27,19 +29,77 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  Future<void> _loginUser() async {
+    final url = Uri.parse('http://10.0.2.2:3000/api/users/login');
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': _emailController.text.trim(),
+          'password': _passwordController.text.trim(),
+        }),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final decoded = jsonDecode(response.body);
+print('📦 Raw response: $decoded');
+
+final token = decoded['token'];
+final data = decoded['data'];
+
+if (data == null || data['user'] == null) {
+  print('⚠️ data or user is null: $data');
+  throw Exception('Invalid response format: missing user or token');
+}
+
+final user = data['user'];
+final userId = user['_id'];
+final role = user['role'];
+
+print('✅ Parsed userId: $userId');
+print('✅ Parsed role: $role');
+print('✅ Parsed token: $token');
+
+// Save to SharedPreferences
+final prefs = await SharedPreferences.getInstance();
+await prefs.setString('auth_token', token);
+await prefs.setString('user_id', userId);
+await prefs.setString('role', role);
+
+
+        final apiService = ApiService(baseUrl: 'http://10.0.2.2:3005');
+        await apiService.registerFcmToken(
+            data['user']['_id'], data['user']['role']);
+
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DashBoard()),
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Login successful!'),
+              backgroundColor: Colors.green),
+        );
+      } else {
+        final error = jsonDecode(response.body)['message'] ?? 'Login failed';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   void _submitForm() {
     if (_formKey.currentState!.validate()) {
-      // Login logic would go here 
+      // Login logic would go here
       //navigate to home
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const DashBoard()),
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Login successful!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      _loginUser();
     }
   }
 
@@ -58,7 +118,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 // Logo and welcome text
                 _buildHeader(),
                 const SizedBox(height: 40),
-                
+
                 // Form
                 Form(
                   key: _formKey,
@@ -68,27 +128,27 @@ class _LoginScreenState extends State<LoginScreen> {
                       // Email field
                       _buildEmailField(),
                       const SizedBox(height: 16),
-                      
+
                       // Password field
                       _buildPasswordField(),
                       const SizedBox(height: 8),
-                      
+
                       // Remember me and Forgot password
                       _buildRememberForgotRow(),
                       const SizedBox(height: 24),
-                      
+
                       // Login button
                       _buildLoginButton(),
                       const SizedBox(height: 16),
-                      
+
                       // Or continue with
                       _buildDivider(),
                       const SizedBox(height: 16),
-                      
+
                       // Social login options
                       _buildSocialLoginRow(),
                       const SizedBox(height: 24),
-                      
+
                       // Sign up option
                       _buildSignUpOption(),
                     ],
@@ -153,12 +213,12 @@ class _LoginScreenState extends State<LoginScreen> {
         if (value == null || value.isEmpty) {
           return 'Please enter your email';
         }
-        
+
         final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
         if (!emailRegex.hasMatch(value)) {
           return 'Please enter a valid email address';
         }
-        
+
         return null;
       },
     );
@@ -174,7 +234,9 @@ class _LoginScreenState extends State<LoginScreen> {
         hintText: 'Enter your password',
         suffixIcon: IconButton(
           icon: Icon(
-            _isPasswordVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            _isPasswordVisible
+                ? Icons.visibility_outlined
+                : Icons.visibility_off_outlined,
           ),
           onPressed: () {
             setState(() {
@@ -206,7 +268,8 @@ class _LoginScreenState extends State<LoginScreen> {
               width: 24,
               child: Checkbox(
                 value: _rememberMe,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4)),
                 onChanged: (value) {
                   setState(() {
                     _rememberMe = value!;
@@ -326,9 +389,9 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         TextButton(
           onPressed: () {
-             Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SignupScreen()),
-    );
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SignupScreen()),
+            );
           },
           child: Text(
             'Sign Up',

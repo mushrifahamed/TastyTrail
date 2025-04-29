@@ -37,15 +37,25 @@ const saveDeliveryPerson = async (data) => {
     const newDeliveryPerson = new DeliveryPerson({
       name: data.name,
       phone: data.phone,
-      location: "",
-      availability: true,
-      vehicleType: data.vehicleType,
-      vehicleLicensePlate: data.vehicleLicensePlate,
+      role: data.role || 'delivery_personnel',
+      isActive: data.isActive ?? false,
+      status: data.status || 'pending',
+      nicOrLicense: data.nicOrLicense || '',
+      vehicleInfo: {
+        type: data.vehicleInfo?.type || '',
+        number: data.vehicleInfo?.number || '',
+      },
+      documents: data.documents || [],
+      emailVerified: data.emailVerified ?? false,
+      phoneVerified: data.phoneVerified ?? false,
+      createdAt: data.createdAt ? new Date(data.createdAt.$date.$numberLong * 1) : new Date(),
+      updatedAt: data.updatedAt ? new Date(data.updatedAt.$date.$numberLong * 1) : new Date(),
     });
+
     await newDeliveryPerson.save();
     console.log(`Saved delivery person: ${newDeliveryPerson.name}`);
   } catch (error) {
-    console.error('Error saving delivery person:', error);
+    console.error('Error saving delivery person:', error.message);
   }
 };
 

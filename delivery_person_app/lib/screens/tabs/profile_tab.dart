@@ -1,4 +1,6 @@
+import 'package:delivery_person_app/screens/login_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ProfileTab extends StatelessWidget {
   const ProfileTab({Key? key}) : super(key: key);
@@ -159,21 +161,28 @@ class ProfileTab extends StatelessWidget {
           onTap: () {},
         ),
         const SizedBox(height: 16),
-        OutlinedButton.icon(
-          onPressed: () {
-            // TODO: Logout action
-          },
-          icon: Icon(Icons.logout, color: Colors.red.shade700),
-          label: Text(
-            'Logout',
-            style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.w500),
-          ),
-          style: OutlinedButton.styleFrom(
-            side: BorderSide(color: Colors.red.shade300),
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        ),
+       OutlinedButton.icon(
+  onPressed: () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  },
+  icon: Icon(Icons.logout, color: Colors.red.shade700),
+  label: Text(
+    'Logout',
+    style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.w500),
+  ),
+  style: OutlinedButton.styleFrom(
+    side: BorderSide(color: Colors.red.shade300),
+    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+  ),
+),
+
         const SizedBox(height: 24),
         Text(
           'App Version 1.0.0',

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);
@@ -11,42 +13,107 @@ class SignupScreen extends StatefulWidget {
 class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _fullNameController = TextEditingController();
-  final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _nicOrLicenseController = TextEditingController();
+  final _vehicleNumberController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _licenseNumberController = TextEditingController();
-  final _vehicleInfoController = TextEditingController();
-  final _vehicleRegistrationController = TextEditingController();
 
-  String _selectedVehicleType = 'Car';
-  final List<String> _vehicleTypes = ['Car', 'Motorcycle', 'Bicycle', 'Scooter', 'Van'];
+  String _selectedVehicleType = 'bike';
+  final List<String> _vehicleTypes = ['bike', 'car', 'van', 'truck', 'tuk'];
   bool _agreeToTerms = false;
   bool _isPasswordVisible = false;
   bool _isConfirmPasswordVisible = false;
+  bool _isLoading = false;
+
+  // Mock document upload URLs (in a real app, you would implement actual file uploads)
+  List<String> _uploadedDocuments = [];
 
   @override
   void dispose() {
     _fullNameController.dispose();
-    _emailController.dispose();
     _phoneController.dispose();
+    _nicOrLicenseController.dispose();
+    _vehicleNumberController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _licenseNumberController.dispose();
-    _vehicleInfoController.dispose();
-    _vehicleRegistrationController.dispose();
     super.dispose();
+  }
+
+  Future<void> _registerUser() async {
+    if (_uploadedDocuments.isEmpty) {
+      // For demo purposes, add placeholder document URLs
+      _uploadedDocuments = [
+        "https://yourdomain.com/uploads/license.jpg",
+        "https://yourdomain.com/uploads/insurance.jpg"
+      ];
+    }
+
+    final Map<String, dynamic> registrationData = {
+      "name": _fullNameController.text,
+      "phone": _phoneController.text,
+      "nicOrLicense": _nicOrLicenseController.text,
+      "vehicleType": _selectedVehicleType,
+      "vehicleNumber": _vehicleNumberController.text,
+      "documents": _uploadedDocuments,
+    };
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse('http://10.0.2.2:3000/api/users/delivery/register'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(registrationData),
+      );
+
+      setState(() {
+        _isLoading = false;
+      });
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        // Registration successful
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Registration successful! You can now log in.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Navigate to login screen or home page
+        Navigator.of(context).pop();
+      } else {
+        // Handle error
+        final errorData = jsonDecode(response.body);
+        String errorMessage = errorData['message'] ?? 'Registration failed. Please try again.';
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Connection error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   void _submitForm() {
     if (_formKey.currentState!.validate() && _agreeToTerms) {
-      // Registration logic would go here
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Registration successful! Verification pending.'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      _registerUser();
     } else if (!_agreeToTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -55,6 +122,22 @@ class _SignupScreenState extends State<SignupScreen> {
         ),
       );
     }
+  }
+
+  void _mockDocumentUpload(String documentType) {
+    // In a real app, you would implement file picking and uploading
+    // For this example, we'll just show a success message
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$documentType uploaded successfully'),
+        backgroundColor: Colors.green,
+      ),
+    );
+    
+    // For demonstration purposes, add a document URL to our list
+    setState(() {
+      _uploadedDocuments.add("https://yourdomain.com/uploads/$documentType-${DateTime.now().millisecondsSinceEpoch}.jpg");
+    });
   }
 
   @override
@@ -69,457 +152,421 @@ class _SignupScreenState extends State<SignupScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: const Text(
-          'Create Driver Account',
+          'Create Delivery Driver Account',
           style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
         ),
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Personal Information',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.deepPurple.shade800,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                
-                // Full Name
-                TextFormField(
-                  controller: _fullNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Full Name',
-                    prefixIcon: Icon(Icons.person_outline),
-                    hintText: 'Enter your full name',
-                    filled: true,
-                    fillColor: Color(0xFFF5F5F5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter your full name';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                
-                // Email
-                TextFormField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: Icon(Icons.email_outlined),
-                    hintText: 'your.email@example.com',
-                    filled: true,
-                    fillColor: Color(0xFFF5F5F5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your email';
-                    }
-                    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-                    if (!emailRegex.hasMatch(value)) {
-                      return 'Please enter a valid email address';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                
-                // Phone Number
-                TextFormField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(10),
-                  ],
-                  decoration: const InputDecoration(
-                    labelText: 'Phone Number',
-                    prefixIcon: Icon(Icons.phone_outlined),
-                    hintText: 'Enter your phone number',
-                    filled: true,
-                    fillColor: Color(0xFFF5F5F5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your phone number';
-                    }
-                    if (value.length < 10) {
-                      return 'Please enter a valid phone number';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                
-                // Password
-                TextFormField(
-                  controller: _passwordController,
-                  obscureText: !_isPasswordVisible,
-                  decoration: InputDecoration(
-                    labelText: 'Password',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    hintText: 'Create a password',
-                    filled: true,
-                    fillColor: const Color(0xFFF5F5F5),
-                    border: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide.none,
-                    ),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _isPasswordVisible
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
+      body: _isLoading 
+          ? Center(child: CircularProgressIndicator())
+          : SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20.0),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Personal Information',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.deepPurple.shade800,
+                        ),
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _isPasswordVisible = !_isPasswordVisible;
-                        });
-                      },
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter a password';
-                    }
-                    if (value.length < 8) {
-                      return 'Password must be at least 8 characters';
-                    }
-                    // Check for at least one uppercase letter
-                    if (!value.contains(RegExp(r'[A-Z]'))) {
-                      return 'Password must contain at least one uppercase letter';
-                    }
-                    // Check for at least one number
-                    if (!value.contains(RegExp(r'[0-9]'))) {
-                      return 'Password must contain at least one number';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                
-                // Confirm Password
-                TextFormField(
-                  controller: _confirmPasswordController,
-                  obscureText: !_isConfirmPasswordVisible,
-                  decoration: InputDecoration(
-                    labelText: 'Confirm Password',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    hintText: 'Confirm your password',
-                    filled: true,
-                    fillColor: const Color(0xFFF5F5F5),
-                    border: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide.none,
-                    ),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _isConfirmPasswordVisible
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
+                      const SizedBox(height: 16),
+                      
+                      // Full Name
+                      TextFormField(
+                        controller: _fullNameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Full Name',
+                          prefixIcon: Icon(Icons.person_outline),
+                          hintText: 'Enter your full name',
+                          filled: true,
+                          fillColor: Color(0xFFF5F5F5),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter your full name';
+                          }
+                          return null;
+                        },
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _isConfirmPasswordVisible = !_isConfirmPasswordVisible;
-                        });
-                      },
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please confirm your password';
-                    }
-                    if (value != _passwordController.text) {
-                      return 'Passwords do not match';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 24),
-                
-                // Driver Information
-                Text(
-                  'Driver Information',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.deepPurple.shade800,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                
-                // Driver's License
-                TextFormField(
-                  controller: _licenseNumberController,
-                  decoration: const InputDecoration(
-                    labelText: 'Driver\'s License Number',
-                    prefixIcon: Icon(Icons.badge_outlined),
-                    hintText: 'Enter your license number',
-                    filled: true,
-                    fillColor: Color(0xFFF5F5F5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your license number';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                
-                // Vehicle Type Dropdown
-                DropdownButtonFormField<String>(
-                  value: _selectedVehicleType,
-                  decoration: const InputDecoration(
-                    labelText: 'Vehicle Type',
-                    prefixIcon: Icon(Icons.directions_car_outlined),
-                    filled: true,
-                    fillColor: Color(0xFFF5F5F5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  items: _vehicleTypes.map((String type) {
-                    return DropdownMenuItem<String>(
-                      value: type,
-                      child: Text(type),
-                    );
-                  }).toList(),
-                  onChanged: (String? newValue) {
-                    setState(() {
-                      _selectedVehicleType = newValue!;
-                    });
-                  },
-                ),
-                const SizedBox(height: 16),
-                
-                // Vehicle Information
-                TextFormField(
-                  controller: _vehicleInfoController,
-                  decoration: const InputDecoration(
-                    labelText: 'Vehicle Make/Model/Year',
-                    prefixIcon: Icon(Icons.car_repair_outlined),
-                    hintText: 'e.g., Toyota Corolla 2020',
-                    filled: true,
-                    fillColor: Color(0xFFF5F5F5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter vehicle information';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                
-                // Vehicle Registration
-                TextFormField(
-                  controller: _vehicleRegistrationController,
-                  decoration: const InputDecoration(
-                    labelText: 'Vehicle Registration Number',
-                    prefixIcon: Icon(Icons.article_outlined),
-                    hintText: 'Enter vehicle registration number',
-                    filled: true,
-                    fillColor: Color(0xFFF5F5F5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter vehicle registration number';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 24),
-                
-                // Upload Documents Section
-                Text(
-                  'Upload Documents',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.deepPurple.shade800,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                
-                // Document Upload Buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildDocumentUploadButton(
-                        'License Photo', 
-                        Icons.badge_outlined,
+                      const SizedBox(height: 16),
+                      
+                      // Phone Number
+                      TextFormField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                          labelText: 'Phone Number',
+                          prefixIcon: Icon(Icons.phone_outlined),
+                          hintText: 'Enter your phone number (e.g., +94779422535)',
+                          filled: true,
+                          fillColor: Color(0xFFF5F5F5),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your phone number';
+                          }
+                          // Basic phone number validation
+                          if (!value.startsWith('+')) {
+                            return 'Phone number should start with country code (e.g., +94)';
+                          }
+                          return null;
+                        },
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildDocumentUploadButton(
-                        'Vehicle Registration', 
-                        Icons.description_outlined,
+                      const SizedBox(height: 24),
+                      
+                      // Password
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: !_isPasswordVisible,
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          hintText: 'Create a password',
+                          filled: true,
+                          fillColor: const Color(0xFFF5F5F5),
+                          border: const OutlineInputBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                            borderSide: BorderSide.none,
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _isPasswordVisible
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _isPasswordVisible = !_isPasswordVisible;
+                              });
+                            },
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter a password';
+                          }
+                          if (value.length < 8) {
+                            return 'Password must be at least 8 characters';
+                          }
+                          return null;
+                        },
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildDocumentUploadButton(
-                        'Profile Photo',
-                        Icons.person_outline,
+                      const SizedBox(height: 16),
+                      
+                      // Confirm Password
+                      TextFormField(
+                        controller: _confirmPasswordController,
+                        obscureText: !_isConfirmPasswordVisible,
+                        decoration: InputDecoration(
+                          labelText: 'Confirm Password',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          hintText: 'Confirm your password',
+                          filled: true,
+                          fillColor: const Color(0xFFF5F5F5),
+                          border: const OutlineInputBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                            borderSide: BorderSide.none,
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _isConfirmPasswordVisible
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _isConfirmPasswordVisible = !_isConfirmPasswordVisible;
+                              });
+                            },
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please confirm your password';
+                          }
+                          if (value != _passwordController.text) {
+                            return 'Passwords do not match';
+                          }
+                          return null;
+                        },
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildDocumentUploadButton(
-                        'Insurance Document',
-                        Icons.policy_outlined,
+                      const SizedBox(height: 24),
+                      
+                      Text(
+                        'Driver Information',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.deepPurple.shade800,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                
-                // Terms and Conditions
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _agreeToTerms,
-                      onChanged: (bool? value) {
-                        setState(() {
-                          _agreeToTerms = value!;
-                        });
-                      },
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
+                      const SizedBox(height: 16),
+                      
+                      // NIC or License Number
+                      TextFormField(
+                        controller: _nicOrLicenseController,
+                        decoration: const InputDecoration(
+                          labelText: 'NIC or License Number',
+                          prefixIcon: Icon(Icons.badge_outlined),
+                          hintText: 'Enter your NIC or license number',
+                          filled: true,
+                          fillColor: Color(0xFFF5F5F5),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your NIC or license number';
+                          }
+                          return null;
+                        },
                       ),
-                    ),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () {
+                      const SizedBox(height: 16),
+                      
+                      // Vehicle Type Dropdown
+                      DropdownButtonFormField<String>(
+                        value: _selectedVehicleType,
+                        decoration: const InputDecoration(
+                          labelText: 'Vehicle Type',
+                          prefixIcon: Icon(Icons.directions_car_outlined),
+                          filled: true,
+                          fillColor: Color(0xFFF5F5F5),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        items: _vehicleTypes.map((String type) {
+                          return DropdownMenuItem<String>(
+                            value: type,
+                            child: Text(type),
+                          );
+                        }).toList(),
+                        onChanged: (String? newValue) {
                           setState(() {
-                            _agreeToTerms = !_agreeToTerms;
+                            _selectedVehicleType = newValue!;
                           });
                         },
-                        child: Text.rich(
-                          TextSpan(
-                            text: 'I agree to the ',
-                            style: TextStyle(color: Colors.grey.shade700),
+                      ),
+                      const SizedBox(height: 16),
+                      
+                      // Vehicle Number
+                      TextFormField(
+                        controller: _vehicleNumberController,
+                        decoration: const InputDecoration(
+                          labelText: 'Vehicle Number',
+                          prefixIcon: Icon(Icons.car_repair_outlined),
+                          hintText: 'e.g., WB-1234',
+                          filled: true,
+                          fillColor: Color(0xFFF5F5F5),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(12)),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter vehicle number';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 24),
+                      
+                      // Upload Documents Section
+                      Text(
+                        'Upload Documents',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.deepPurple.shade800,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      
+                      // Document Upload Buttons
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildDocumentUploadButton(
+                              'License Photo', 
+                              Icons.badge_outlined,
+                              () => _mockDocumentUpload('license'),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _buildDocumentUploadButton(
+                              'Insurance Document',
+                              Icons.policy_outlined,
+                              () => _mockDocumentUpload('insurance'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      
+                      if (_uploadedDocuments.isNotEmpty)
+                        Container(
+                          margin: EdgeInsets.only(top: 16),
+                          padding: EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.green.shade200),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              TextSpan(
-                                text: 'Terms & Conditions',
+                              Text(
+                                'Uploaded Documents (${_uploadedDocuments.length}):',
                                 style: TextStyle(
-                                  color: Colors.deepPurple.shade700,
                                   fontWeight: FontWeight.bold,
+                                  color: Colors.green.shade800,
                                 ),
                               ),
-                              const TextSpan(
-                                text: ' and ',
-                              ),
-                              TextSpan(
-                                text: 'Privacy Policy',
-                                style: TextStyle(
-                                  color: Colors.deepPurple.shade700,
-                                  fontWeight: FontWeight.bold,
+                              SizedBox(height: 8),
+                              ...List.generate(
+                                _uploadedDocuments.length,
+                                (index) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.check_circle, color: Colors.green, size: 16),
+                                      SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Document ${index + 1}',
+                                          style: TextStyle(color: Colors.green.shade700),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
+                      
+                      const SizedBox(height: 24),
+                      
+                      // Terms and Conditions
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: _agreeToTerms,
+                            onChanged: (bool? value) {
+                              setState(() {
+                                _agreeToTerms = value!;
+                              });
+                            },
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _agreeToTerms = !_agreeToTerms;
+                                });
+                              },
+                              child: Text.rich(
+                                TextSpan(
+                                  text: 'I agree to the ',
+                                  style: TextStyle(color: Colors.grey.shade700),
+                                  children: [
+                                    TextSpan(
+                                      text: 'Terms & Conditions',
+                                      style: TextStyle(
+                                        color: Colors.deepPurple.shade700,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const TextSpan(
+                                      text: ' and ',
+                                    ),
+                                    TextSpan(
+                                      text: 'Privacy Policy',
+                                      style: TextStyle(
+                                        color: Colors.deepPurple.shade700,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                
-                // Submit Button
-                ElevatedButton(
-                  onPressed: _submitForm,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepPurple,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    'Create Account',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                
-                // Login Option
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Already have an account?',
-                      style: TextStyle(color: Colors.grey.shade600),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                      },
-                      child: Text(
-                        'Sign In',
-                        style: TextStyle(
-                          color: Colors.deepPurple.shade700,
-                          fontWeight: FontWeight.bold,
+                      const SizedBox(height: 24),
+                      
+                      // Submit Button
+                      ElevatedButton(
+                        onPressed: _submitForm,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.deepPurple,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Create Account',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 16),
+                      
+                      // Login Option
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Already have an account?',
+                            style: TextStyle(color: Colors.grey.shade600),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                            },
+                            child: Text(
+                              'Sign In',
+                              style: TextStyle(
+                                color: Colors.deepPurple.shade700,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-      ),
     );
   }
 
-  Widget _buildDocumentUploadButton(String title, IconData icon) {
+  Widget _buildDocumentUploadButton(String title, IconData icon, VoidCallback onPressed) {
     return OutlinedButton(
-      onPressed: () {
-        // Document upload logic would go here
-      },
+      onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(vertical: 16),
         side: BorderSide(color: Colors.deepPurple.shade300),

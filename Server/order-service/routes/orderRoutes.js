@@ -13,6 +13,11 @@ const {
 } = require("../controllers/orderController");
 const authMiddleware = require("../utils/authMiddleware");
 
+const { quickCreateOrder } = require('../controllers/quickOrderController');
+
+// POST /api/quick-order
+router.post('/quick-order', quickCreateOrder);
+
 // Customer routes
 router.post("/", authMiddleware(["customer"]), createOrder);
 router.get(

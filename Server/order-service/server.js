@@ -17,6 +17,8 @@ app.use(morgan("dev"));
 
 // Database connection
 connectDB();
+const quickOrderRoutes = require('./routes/orderRoutes'); // path to your routes
+app.use('/api', quickOrderRoutes);
 
 // Routes
 app.use("/api/orders", orderRoutes);
