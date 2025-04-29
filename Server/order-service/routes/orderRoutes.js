@@ -10,6 +10,7 @@ const {
   getDeliveryPersonOrders,
   getDeliveryOrder,
   updateOrderPaymentStatus,
+  getAllOrders,
 } = require("../controllers/orderController");
 const authMiddleware = require("../utils/authMiddleware");
 
@@ -79,5 +80,7 @@ router.post(
   authMiddleware(["internal_service"]),
   updateOrderPaymentStatus
 );
+
+router.get("/", authMiddleware(["restaurant_admin", "admin"]), getAllOrders); // You can modify roles as needed
 
 module.exports = router;
