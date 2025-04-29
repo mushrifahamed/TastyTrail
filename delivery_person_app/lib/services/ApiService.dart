@@ -8,7 +8,7 @@ class ApiService {
 
   ApiService({required this.baseUrl});
 
-  Future<void> registerFcmToken(String userId, String role) async {
+  Future<String?> registerFcmToken(String userId, String role) async {
     try {
       final fcmToken = await FirebaseMessaging.instance.getToken();
 
@@ -26,7 +26,9 @@ class ApiService {
 
         if (response.statusCode == 200) {
           final responseData = jsonDecode(response.body);
-          print(responseData);
+          final data = jsonDecode(response.body);
+          print("✅✅fcm------- $responseData");
+          return data['fcmToken'];
           debugPrint('✅ FCM token registered');
         } else {
           debugPrint('❌ FCM token registration failed: ${response.body}');

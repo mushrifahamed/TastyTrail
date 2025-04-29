@@ -5,6 +5,7 @@ import 'package:delivery_person_app/screens/HomeScreen.dart';
 import 'package:delivery_person_app/screens/SignupScreen.dart';
 import 'package:delivery_person_app/services/ApiService.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,61 +18,64 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController(text: '+94');
   final _passwordController = TextEditingController();
   bool _isPasswordVisible = false;
   bool _rememberMe = false;
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _phoneController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
   Future<void> _loginUser() async {
-    final url = Uri.parse('http://10.0.2.2:3000/api/users/login');
+    final url = Uri.parse('http://10.0.2.2:3000/api/users/login-delivery');
 
     try {
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'email': _emailController.text.trim(),
+          'phone': _phoneController.text.trim(),
           'password': _passwordController.text.trim(),
         }),
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final decoded = jsonDecode(response.body);
-print('📦 Raw response: $decoded');
+        print('📦 Raw response: $decoded');
 
-final token = decoded['token'];
-final data = decoded['data'];
+        final token = decoded['token'];
+        final data = decoded['data'];
 
-if (data == null || data['user'] == null) {
-  print('⚠️ data or user is null: $data');
-  throw Exception('Invalid response format: missing user or token');
-}
+        if (data == null || data['user'] == null) {
+          print('⚠ data or user is null: $data');
+          throw Exception('Invalid response format: missing user or token');
+        }
 
-final user = data['user'];
-final userId = user['_id'];
-final role = user['role'];
+        final user = data['user'];
+        final userId = user['_id'];
+        final role = user['role'];
 
-print('✅ Parsed userId: $userId');
-print('✅ Parsed role: $role');
-print('✅ Parsed token: $token');
+        print('✅ Parsed userId: $userId');
+        print('✅ Parsed role: $role');
+        print('✅ Parsed token: $token');
 
-// Save to SharedPreferences
-final prefs = await SharedPreferences.getInstance();
-await prefs.setString('auth_token', token);
-await prefs.setString('user_id', userId);
-await prefs.setString('role', role);
-
+        // Save to SharedPreferences
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('auth_token', token);
+        await prefs.setString('user_id', userId);
+        await prefs.setString('role', role);
 
         final apiService = ApiService(baseUrl: 'http://10.0.2.2:3005');
-        await apiService.registerFcmToken(
-            data['user']['_id'], data['user']['role']);
+        final fcmToken = await apiService.registerFcmToken(userId, role);
+        if (fcmToken != null) {
+          await prefs.setString('fcm_token', fcmToken);
+          debugPrint('✅ FCM token saved to SharedPreferences');
+        }
+        //save fcm token
 
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const DashBoard()),
@@ -125,8 +129,8 @@ await prefs.setString('role', role);
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Email field
-                      _buildEmailField(),
+                      // Phone number field
+                      _buildPhoneField(),
                       const SizedBox(height: 16),
 
                       // Password field
@@ -200,26 +204,62 @@ await prefs.setString('role', role);
     );
   }
 
-  Widget _buildEmailField() {
+  Widget _buildPhoneField() {
     return TextFormField(
-      controller: _emailController,
-      keyboardType: TextInputType.emailAddress,
+      controller: _phoneController,
+      keyboardType: TextInputType.phone,
       decoration: const InputDecoration(
-        labelText: 'Email',
-        prefixIcon: Icon(Icons.email_outlined),
-        hintText: 'your.email@example.com',
+        labelText: 'Phone Number',
+        prefixIcon: Icon(Icons.phone_outlined),
+        hintText: '+94XXXXXXXXX',
       ),
+      inputFormatters: [
+        // Ensure text always starts with +94 and prevent editing it
+        TextInputFormatter.withFunction((oldValue, newValue) {
+          // Always ensure the text starts with +94
+          if (!newValue.text.startsWith('+94')) {
+            return oldValue;
+          }
+          
+          // Check if user is trying to add a '0' right after +94
+          if (newValue.text.length > 3 && newValue.text.substring(0, 4) == '+940') {
+            return oldValue;
+          }
+          
+          return newValue;
+        }),
+      ],
       validator: (value) {
         if (value == null || value.isEmpty) {
-          return 'Please enter your email';
+          return 'Please enter your phone number';
         }
-
-        final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-        if (!emailRegex.hasMatch(value)) {
-          return 'Please enter a valid email address';
+        
+        if (!value.startsWith('+94')) {
+          return 'Phone number must start with +94';
         }
-
+        
+        // Check if there's a valid number after the country code
+        final number = value.substring(3);
+        if (number.isEmpty) {
+          return 'Please enter your phone number after +94';
+        }
+        
+        // Check if the phone number contains only digits after +94
+        final phoneRegex = RegExp(r'^\+94[1-9]\d{8}$');
+        if (!phoneRegex.hasMatch(value)) {
+          return 'Please enter a valid phone number (+94XXXXXXXXX)';
+        }
+        
         return null;
+      },
+      onChanged: (value) {
+        // Ensure the +94 prefix is always there
+        if (!value.startsWith('+94')) {
+          _phoneController.text = '+94${value.replaceAll('+94', '')}';
+          _phoneController.selection = TextSelection.fromPosition(
+            TextPosition(offset: _phoneController.text.length),
+          );
+        }
       },
     );
   }

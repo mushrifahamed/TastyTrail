@@ -5,7 +5,7 @@ const DeliveryOrder = require('../models/orders'); // Your updated delivery serv
 
 const rabbitmqHost = process.env.RABBITMQ_HOST || 'localhost';  // Smart dynamic
 const rabbitmqURL = `amqp://${rabbitmqHost}`;
-
+const NOTIFICATION_SERVICE_URL = process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3005';
 const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || 'http://localhost:3002'; // Set your order-service API base
 
 const listenForNewOrders = () => {
@@ -52,6 +52,7 @@ const listenForNewOrders = () => {
         });
     });
 };
+ // your notification service base URL
 
 const saveOrderToDeliveryService = async (orderData) => {
     try {
@@ -69,15 +70,24 @@ const saveOrderToDeliveryService = async (orderData) => {
         });
 
         await newDeliveryOrder.save();
-
         console.log(`Saved new order ${orderData._id} into Delivery DB.`);
 
-        // Auto-assign delivery person if available
-        await assignDelivery(newDeliveryOrder._id);
+        // 📣 Broadcast notification to all drivers
+        await axios.post(`${NOTIFICATION_SERVICE_URL}/api/notifications/broadcast`, {
+            role: 'driver',  // make sure your Token model stores drivers as role 'driver'
+            title: 'New Order Available',
+            body: 'A new delivery order is available. Accept it quickly!',
+            data: {
+                orderId: orderData._id,
+                deliveryAddress: orderData.deliveryAddress,
+            }
+        });
+        
     } catch (error) {
         console.error('Error saving order to Delivery Service:', error.message);
     }
 };
+
 
 const assignDelivery = async (deliveryOrderId) => {
     try {

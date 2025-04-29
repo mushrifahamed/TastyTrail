@@ -52,6 +52,7 @@ class _SignupScreenState extends State<SignupScreen> {
     final Map<String, dynamic> registrationData = {
       "name": _fullNameController.text,
       "phone": _phoneController.text,
+      "password": _passwordController.text,
       "nicOrLicense": _nicOrLicenseController.text,
       "vehicleType": _selectedVehicleType,
       "vehicleNumber": _vehicleNumberController.text,

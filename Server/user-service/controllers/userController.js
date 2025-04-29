@@ -394,8 +394,15 @@ const registerCustomer = async (req, res, next) => {
 // Function to register a new Delivery Person
 const registerDeliveryPerson = async (req, res, next) => {
   try {
-    const { name, phone, nicOrLicense, vehicleType, vehicleNumber, documents } =
-      req.body;
+    const {
+      name,
+      password,
+      phone,
+      nicOrLicense,
+      vehicleType,
+      vehicleNumber,
+      documents,
+    } = req.body;
 
     // Check if the phone number is already in use
     const existingUser = await User.findOne({ phone });
@@ -406,6 +413,7 @@ const registerDeliveryPerson = async (req, res, next) => {
     // Create the new delivery person in the User model
     const deliveryPerson = await User.create({
       name,
+      password: await passwordUtils.hashPassword(password),
       phone,
       role: "delivery_personnel",
       nicOrLicense,
@@ -428,6 +436,7 @@ const registerDeliveryPerson = async (req, res, next) => {
       data: {
         user: {
           _id: deliveryPerson._id,
+          password: deliveryPerson.password,
           name: deliveryPerson.name,
           phone: deliveryPerson.phone,
           status: deliveryPerson.status,
@@ -440,14 +449,8 @@ const registerDeliveryPerson = async (req, res, next) => {
 };
 
 // Function to publish a message to RabbitMQ when a delivery person registers
-// Define RabbitMQ URL smartly
-const rabbitmqHost = process.env.RABBITMQ_HOST || 'localhost';
-const rabbitmqURL = `amqp://${rabbitmqHost}`;
-
 const publishDeliveryPersonEvent = (deliveryPerson) => {
-
-  amqp.connect(rabbitmqURL, (error, connection) => {
-
+  amqp.connect("amqp://localhost", (error, connection) => {
     if (error) {
       throw error;
     }
@@ -457,8 +460,7 @@ const publishDeliveryPersonEvent = (deliveryPerson) => {
         throw error;
       }
 
-      const queue = 'delivery_person_registered_queue';
-
+      const queue = "delivery_person_registered_queue"; // Queue for delivery person registration
       const message = JSON.stringify({
         deliveryPersonId: deliveryPerson._id,
         name: deliveryPerson.name,
@@ -467,6 +469,7 @@ const publishDeliveryPersonEvent = (deliveryPerson) => {
         vehicleLicensePlate: deliveryPerson.vehicleInfo.number,
       });
 
+      // Make sure the queue exists and then publish the message
       channel.assertQueue(queue, { durable: true });
       channel.sendToQueue(queue, Buffer.from(message), { persistent: true });
 
@@ -477,6 +480,59 @@ const publishDeliveryPersonEvent = (deliveryPerson) => {
       connection.close();
     }, 500);
   });
+};
+
+// ==================== DELIVERY PERSONNEL LOGIN ====================
+const loginDeliveryPerson = async (req, res, next) => {
+  try {
+    const { phone, password } = req.body;
+
+    if (!phone || !password) {
+      return res.status(400).json({ message: "Phone and password are required" });
+    }
+
+    // Find user by phone
+    const user = await User.findOne({ phone }).select("+password");
+
+    if (!user) {
+      return res.status(404).json({ message: "Delivery personnel not found" });
+    }
+
+    // Check role
+    if (user.role !== "delivery_personnel") {
+      return res.status(403).json({ message: "Access denied. Only delivery personnel can login." });
+    }
+
+    // Validate password
+    const isPasswordValid = await passwordUtils.comparePassword(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: "Invalid phone or password" });
+    }
+
+    // Check if active
+    // if (!user.isActive) {
+    //   return res.status(403).json({ message: "Account not active. Please wait for admin approval." });
+    // }
+
+    // Generate JWT
+    const token = authService.generateToken(user._id, user.role);
+
+    res.status(200).json({
+      status: "success",
+      token,
+      data: {
+        user: {
+          _id: user._id,
+          name: user.name,
+          phone: user.phone,
+          role: user.role,
+          status: user.status,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
 
@@ -707,7 +763,7 @@ module.exports = {
   createRestaurantAdmin,
   getAdminsByRestaurant,
   removeRestaurantAdmin,
-
+  loginDeliveryPerson,
   // Customer methods
   registerCustomer,
 
