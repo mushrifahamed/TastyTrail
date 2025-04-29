@@ -1,4 +1,5 @@
 // lib/screens/home/home_screen.dart
+import 'package:client_customer/screens/order/order_tracking_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -191,11 +192,7 @@ class _HomeScreenState extends State<HomeScreen> with ImageBuilderMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: _selectedIndex == 0
-          ? _buildHomeContent()
-          : _selectedIndex == 1
-              ? const CartScreen()
-              : const ProfileScreen(),
+      body: _getSelectedScreen(),
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
@@ -204,15 +201,40 @@ class _HomeScreenState extends State<HomeScreen> with ImageBuilderMixin {
             label: 'Cart',
           ),
           BottomNavigationBarItem(
+            icon: Icon(Icons.delivery_dining),
+            label: 'Orders',
+          ),
+          BottomNavigationBarItem(
             icon: Icon(Icons.person),
             label: 'Profile',
           ),
         ],
         currentIndex: _selectedIndex,
         selectedItemColor: AppColors.primary,
+        unselectedItemColor: Colors.grey, // Set unselected items to white
+        backgroundColor: Colors.white, // Optional: set navbar background
+        type:
+            BottomNavigationBarType.fixed, // Recommended for more than 3 items
+        showSelectedLabels: true,
+        showUnselectedLabels: true,
         onTap: _onItemTapped,
       ),
     );
+  }
+
+  Widget _getSelectedScreen() {
+    switch (_selectedIndex) {
+      case 0:
+        return _buildHomeContent();
+      case 1:
+        return const CartScreen();
+      case 2:
+        return const OrderTrackingScreen();
+      case 3:
+        return const ProfileScreen();
+      default:
+        return _buildHomeContent();
+    }
   }
 
   Widget _buildHomeContent() {
