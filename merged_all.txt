@@ -1,0 +1,67 @@
+# === Global Configuration ===
+
+# Authentication
+JWT_SECRET=8d19328e0c28fc230954c990d291c62e4ec0e8124a583c00efe0f412842f299e9b74fcc9cb2bc88331f1f3a5346e03bb95ff938d5843855bb690d4edbfcc0baf
+
+# Internal API Key
+INTERNAL_API_KEY=47a4768588747092df308bd0417c3efaade97ff8ba47d17ba90720be55f6c62f
+
+# Environment
+NODE_ENV=development
+
+# === User Service ===
+USER_SERVICE_PORT=3000
+USER_SERVICE_DB=mongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/user_service
+JWT_EXPIRES_IN=1d
+NOTIFICATION_SERVICE_URL=http://notification-service:3005
+RESTAURANT_SERVICE_URL=http://localhost:3001
+
+# Mailer Configuration
+SMTP_HOST=smtp.mailersend.net
+SMTP_PORT=587
+SMTP_USER=MS_G08cz3@test-ywj2lpnnqxjg7oqz.mlsender.net
+SMTP_PASS=mssp.cqYhMlH.vywj2lp7zk1l7oqz.N8UL91O
+MAILERSEND_FROM_EMAIL=segroup80@gmail.com
+
+G_USER=segroup80@gmail.com
+G_PASS=mnts agen lmqu tvol
+
+# === Restaurant Service ===
+RESTAURANT_SERVICE_PORT=3001
+RESTAURANT_SERVICE_DB=mongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/restaurant_service
+
+# === Order Service ===
+ORDER_SERVICE_PORT=3002
+ORDER_SERVICE_DB=mongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/order_service
+RESTAURANT_SERVICE_URL=http://localhost:3001
+PAYMENT_SERVICE_URL=http://localhost:3003
+NOTIFICATION_SERVICE_URL=http://localhost:5000
+USER_SERVICE_URL=http://127.0.0.1:3000
+
+# === Payment Service ===
+PAYMENT_SERVICE_PORT=3003
+PAYMENT_SERVICE_DB=mongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/payment_service
+ORDER_SERVICE_URL=http://localhost:3002
+
+# PayHere Configuration
+PAYHERE_MERCHANT_ID=1230199
+PAYHERE_MERCHANT_SECRET=MjY3MzgyNDY4NjMzNTQ5NjgwOTY5MjE0ODU2ODM4NDAyODA0MzE=
+PAYHERE_APP_ID=4OVxzCXPhb64JFnJVGW6eH3HB
+PAYHERE_APP_SECRET=48blpHobDGu4ZCclTnhsxv8W3yUrAPqVl4eSlZBPnDso
+PAYHERE_SANDBOX=true
+PAYHERE_API_ENDPOINT=https://www.payhere.lk/pay/checkout
+
+PAYHERE_RETURN_URL=http://localhost:3008/payment/success
+PAYHERE_CANCEL_URL=http://localhost:3008/payment/cancel
+PAYHERE_NOTIFY_URL=http://localhost:3008/api/payments/notify
+
+# === Delivery Service ===
+DELIVERY_SERVICE_PORT=3008
+DELIVERY_SERVICE_DB=mmongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/delivery-service
+
+# === Notification Service ===
+NOTIFICATION_SERVICE_PORT=5000
+NOTIFICATION_SERVICE_DB=mongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/notification-service
+
+# Firebase (Assumed Path)
+# Place Firebase Admin SDK JSON file at: ./server/notification-service/tastytrail-c628e-firebase-adminsdk-fbsvc-d49e61e481.json

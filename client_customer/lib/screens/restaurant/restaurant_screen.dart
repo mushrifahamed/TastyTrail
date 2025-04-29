@@ -111,11 +111,27 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen>
       final restaurantProvider =
           Provider.of<RestaurantProvider>(context, listen: false);
 
-      // Make sure this method exists in your RestaurantProvider
       final restaurant =
           await restaurantProvider.getRestaurantById(widget.restaurantId);
 
-      print('DEBUG: Restaurant fetched successfully: ${restaurant.name}');
+      // Add detailed logging of the fetched data
+      print('DEBUG: Restaurant details:');
+      print('- Name: ${restaurant?.name}');
+      print('- Description: ${restaurant?.description}');
+      print('- Cover Image: ${restaurant?.coverImage}');
+      print(
+          '- Operating Hours: ${restaurant?.operatingHours?.from} - ${restaurant?.operatingHours?.to}');
+      print('- Availability: ${restaurant?.availability}');
+      print('- Menu Items: ${restaurant?.menu.length} items');
+
+      // Log each menu item
+      restaurant?.menu.forEach((item) {
+        print('  * Menu Item:');
+        print('    - Name: ${item.name}');
+        print('    - Price: \$${item.price}');
+        print('    - Description: ${item.description}');
+        print('    - Image: ${item.image}');
+      });
 
       setState(() {
         _restaurant = restaurant;

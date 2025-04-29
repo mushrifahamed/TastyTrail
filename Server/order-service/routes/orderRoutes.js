@@ -52,7 +52,7 @@ router.get(
 // Order tracking routes
 router.patch(
   "/:orderId/status",
-  authMiddleware(["restaurant_admin", "delivery_personnel"]),
+  authMiddleware(["restaurant_admin", "delivery_personnel", "admin"]),
   updateOrderStatus
 );
 

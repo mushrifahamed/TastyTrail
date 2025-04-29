@@ -28,9 +28,6 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: function () {
-      return this.role !== "delivery_personnel"; // Temporary for delivery until approved
-    },
     minlength: 8,
     select: false,
   },
