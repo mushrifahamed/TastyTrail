@@ -82,8 +82,32 @@ const path = require('path');
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/');
+    cb(null, 'uploads/');
   },
   filename: (req, file, cb) => {
+    const { name, menu } = req.body;
+    
+    try {
+      // Parse menu if it's a string (from form-data)
+      const parsedMenu = typeof menu === 'string' ? JSON.parse(menu) : (menu || []);
+      
+      if (file.fieldname === 'coverImage') {
+        // Handle cover image filename
+        const cleanName = name ? name.replace(/\s+/g, '_').toLowerCase() : 'restaurant';
+        cb(null, `${cleanName}_cover_${Date.now()}${path.extname(file.originalname)}`);
+      } 
+      else if (file.fieldname === 'menuItemImages') {
+        // Handle menu item images
+        const index = req.files['menuItemImages']?.indexOf(file) || 0;
+        const itemName = parsedMenu[index]?.name || `item_${index}`;
+        cb(null, `${itemName.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}${path.extname(file.originalname)}`);
+      } 
+      else {
+        // Default filename
+        cb(null, `${Date.now()}${path.extname(file.originalname)}`);
+      }
+    } catch (err) {
+      console.error('Error generating filename:', err);
     const { name, menu } = req.body;
     
     try {
@@ -110,6 +134,7 @@ const storage = multer.diskStorage({
       cb(null, `${Date.now()}${path.extname(file.originalname)}`);
     }
   }
+  }
 });
 
 const fileFilter = (req, file, cb) => {
@@ -119,11 +144,19 @@ const fileFilter = (req, file, cb) => {
 
   if (extname && mimetype) {
     cb(null, true);
+    cb(null, true);
   } else {
     cb(new Error('Invalid file type. Only jpg, jpeg, and png are allowed.'));
   }
 };
 
+const upload = multer({ 
+  storage, 
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 const upload = multer({ 
   storage, 
   fileFilter,
@@ -261,6 +294,13 @@ const addRestaurant = async (req, res) => {
     }
 
     await newRestaurant.save();
+
+    res.status(201).json({
+      status: "success",
+      data: {
+        restaurant: newRestaurant,
+      },
+    });
 
     res.status(201).json({
       status: "success",
@@ -599,10 +639,44 @@ module.exports = {
 };
 
 
+
 /* File: ./server/restaurant-service\middleware\authMiddleware.js */
+// restaurant-service/middleware/authMiddleware.js
 // restaurant-service/middleware/authMiddleware.js
 const jwt = require('jsonwebtoken');
 
+const verifyToken = (roles = []) => {
+  return async (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ message: 'No token provided' });
+    }
+
+    try {
+      // Verify token directly (no API call needed)
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      
+      // Attach user info from token
+      req.user = {
+        id: decoded.id,
+        role: decoded.role
+      };
+
+      // Check if user has required role
+      if (roles.length && !roles.includes(decoded.role)) {
+        return res.status(403).json({ message: 'Insufficient permissions' });
+      }
+
+      next();
+    } catch (err) {
+      console.error('Token verification error:', err);
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+  };
+};
+
+module.exports = verifyToken;
 const verifyToken = (roles = []) => {
   return async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
@@ -687,7 +761,22 @@ const uploadFields = upload.fields([
     { name: 'menuItemImages', maxCount: 10 } // Adjust as needed
   ]);
 
+const uploadFields = upload.fields([
+    { name: 'coverImage', maxCount: 1 },
+    { name: 'menuItemImages', maxCount: 10 } // Adjust as needed
+  ]);
+
 // Add a new restaurant should have verifyToken
+router.post('/', 
+    (req, res, next) => {
+        // Log incoming request for debugging
+        console.log('Incoming restaurant data:', req.body);
+        next();
+    },
+    uploadFields, 
+    verifyToken(['admin', 'super_admin']), 
+    restaurantController.addRestaurant
+    );
 router.post('/', 
     (req, res, next) => {
         // Log incoming request for debugging
@@ -716,10 +805,19 @@ router.get("/:id/availability", restaurantController.getRestaurantAvailability);
 // Get restaurant details by ID (public)
 router.get("/:id", restaurantController.getRestaurantById);
 
+router.get("/", restaurantController.getAllRestaurants); // Add this route to get all restaurants
+
+// Get restaurant availability (public)
+router.get("/:id/availability", restaurantController.getRestaurantAvailability);
+
+// Get restaurant details by ID (public)
+router.get("/:id", restaurantController.getRestaurantById);
+
 // Manage menu (add/update/remove items) shoul have verify token
 router.put(
   "/:id/menu",
   upload.single("menuItemImage"),
+  verifyToken(['admin', 'restaurant_admin']),
   verifyToken(['admin', 'restaurant_admin']),
   restaurantController.manageMenu
 );

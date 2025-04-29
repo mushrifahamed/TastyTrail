@@ -24,6 +24,11 @@ router.post('/',
 // Get nearby restaurants
 router.get("/nearby", restaurantController.getNearbyRestaurants);
 
+// Add this near the top with other routes
+router.get('/verify/:restaurantId', 
+    restaurantController.verifyRestaurant
+  );
+
 // get by id
 router.get("/:id", restaurantController.getRestaurantById);
 
@@ -36,14 +41,27 @@ router.get("/", restaurantController.getAllRestaurants); // Add this route to ge
 router.get("/:id/availability", restaurantController.getRestaurantAvailability);
 
 // Get restaurant details by ID (public)
-router.get("/:id", restaurantController.getRestaurantById);
+//router.get("/:id", restaurantController.getRestaurantById);
 
-// Manage menu (add/update/remove items) shoul have verify token
-router.put(
-  "/:id/menu",
+// Menu Item Management Routes
+router.post(
+  "/:restaurantId/menu",
   upload.single("menuItemImage"),
   verifyToken(['admin', 'restaurant_admin']),
-  restaurantController.manageMenu
+  restaurantController.addMenuItem
+);
+
+router.put(
+  "/:restaurantId/menu/:menuItemId",
+  upload.single("menuItemImage"),
+  verifyToken(['admin', 'restaurant_admin']),
+  restaurantController.updateMenuItem
+);
+
+router.delete(
+  "/:restaurantId/menu/:menuItemId",
+  verifyToken(['admin', 'restaurant_admin']),
+  restaurantController.deleteMenuItem
 );
 
 // search restaurants
