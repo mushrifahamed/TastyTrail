@@ -4,6 +4,77 @@ import '../../models/restaurant.dart';
 import '../../providers/cart_provider.dart';
 import '../../providers/restaurant_provider.dart';
 
+mixin ImageBuilderMixin {
+  final String _baseImageUrl = 'http://10.0.2.2:3001/';
+
+  Widget buildImage(String? imagePath,
+      {double? width, double? height, BoxFit fit = BoxFit.cover}) {
+    if (imagePath == null || imagePath.isEmpty) {
+      return _buildPlaceholder(width: width, height: height);
+    }
+
+    // Handle absolute URLs (like Unsplash)
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      return _networkImage(imagePath, width: width, height: height, fit: fit);
+    }
+
+    // Handle local backend images - clean up the path
+    String cleanPath = imagePath
+        .replaceAll(
+            '\\', '/') // Replace Windows backslashes with forward slashes
+        .replaceAll('/uploads/', ''); // Remove any 'uploads/' prefix if present
+
+    return _serverImage(cleanPath, width: width, height: height, fit: fit);
+  }
+
+  Widget _serverImage(String path,
+      {double? width, double? height, BoxFit? fit}) {
+    final fullUrl = _baseImageUrl + path;
+    print('Loading image from: $fullUrl'); // Debug log
+    return _networkImage(fullUrl, width: width, height: height, fit: fit);
+  }
+
+  Widget _networkImage(String url,
+      {double? width, double? height, BoxFit? fit}) {
+    return Image.network(
+      url,
+      width: width,
+      height: height,
+      fit: fit,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return _buildLoadingPlaceholder(width: width, height: height);
+      },
+      errorBuilder: (context, error, stackTrace) {
+        print('Image load error: $error');
+        return _buildPlaceholder(width: width, height: height);
+      },
+    );
+  }
+
+  Widget _buildPlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      child: const Icon(Icons.restaurant, size: 40, color: Colors.grey),
+    );
+  }
+
+  Widget _buildLoadingPlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      child: const Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+        ),
+      ),
+    );
+  }
+}
+
 class RestaurantDetailScreen extends StatefulWidget {
   final String restaurantId;
 
@@ -16,7 +87,8 @@ class RestaurantDetailScreen extends StatefulWidget {
   State<RestaurantDetailScreen> createState() => _RestaurantDetailScreenState();
 }
 
-class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
+class _RestaurantDetailScreenState extends State<RestaurantDetailScreen>
+    with ImageBuilderMixin {
   bool _isLoading = true;
   Restaurant? _restaurant;
   String? _error;
@@ -128,19 +200,12 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
             ),
           ),
         ),
-        background: _restaurant!.coverImage.isNotEmpty
-            ? Image.network(
-                _restaurant!.coverImage,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: Colors.grey[300],
-                  child: const Icon(Icons.restaurant, size: 50),
-                ),
-              )
-            : Container(
-                color: Colors.grey[300],
-                child: const Icon(Icons.restaurant, size: 50),
-              ),
+        background: buildImage(
+          _restaurant!.coverImage,
+          width: double.infinity,
+          height: double.infinity,
+          fit: BoxFit.cover,
+        ),
       ),
     );
   }
@@ -203,19 +268,12 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
               child: SizedBox(
                 width: 80,
                 height: 80,
-                child: menuItem.image.isNotEmpty
-                    ? Image.network(
-                        menuItem.image,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          color: Colors.grey[300],
-                          child: const Icon(Icons.restaurant),
-                        ),
-                      )
-                    : Container(
-                        color: Colors.grey[300],
-                        child: const Icon(Icons.restaurant),
-                      ),
+                child: buildImage(
+                  menuItem.image,
+                  width: 80,
+                  height: 80,
+                  fit: BoxFit.cover,
+                ),
               ),
             ),
             const SizedBox(width: 12),

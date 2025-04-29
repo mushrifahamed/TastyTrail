@@ -1266,6 +1266,254 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 
+/* File: screens\auth\profile_screen.dart */
+import 'package:client_customer/providers/auth_provider.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../theme/app_theme.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+class ProfileScreen extends StatefulWidget {
+  const ProfileScreen({Key? key}) : super(key: key);
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  Map<String, dynamic>? user;
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchUser();
+  }
+
+  Future<void> fetchUser() async {
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+    print(token);
+    if (token == null) {
+      setState(() {
+        loading = false;
+      });
+      return;
+    }
+    final response = await http.get(
+      Uri.parse('http://10.0.2.2:3000/api/users/me'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      setState(() {
+        user = data['data']['user'];
+        loading = false;
+      });
+    } else {
+      setState(() {
+        loading = false;
+      });
+    }
+  }
+
+  Future<void> logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('token');
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    if (user == null) {
+      return const Scaffold(
+        body: Center(
+          child: Text('Not logged in.', style: TextStyle(fontSize: 16)),
+        ),
+      );
+    }
+
+    final theme = AppTheme.lightTheme;
+    final primaryColor = AppColors.primary;
+    final lightPrimaryColor = AppColors.lightprime;
+
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              lightPrimaryColor,
+              Colors.white,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                children: [
+                  const SizedBox(height: 20),
+                  // Profile Avatar
+                  Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 20,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    child: CircleAvatar(
+                      radius: 50,
+                      backgroundColor: lightPrimaryColor,
+                      child: Text(
+                        user!['name'] != null && user!['name'].isNotEmpty
+                            ? user!['name'][0].toUpperCase()
+                            : '?',
+                        style: TextStyle(
+                          fontSize: 40,
+                          fontWeight: FontWeight.bold,
+                          color: primaryColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  // User Info Cards
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        _buildInfoRow(
+                          icon: Icons.person,
+                          title: 'Name',
+                          value: user!['name'] ?? 'Not set',
+                          primaryColor: primaryColor,
+                        ),
+                        const Divider(height: 20),
+                        _buildInfoRow(
+                          icon: Icons.email,
+                          title: 'Email',
+                          value: user!['email'] ?? 'Not set',
+                          primaryColor: primaryColor,
+                        ),
+                        if (user!['phone'] != null) ...[
+                          const Divider(height: 20),
+                          _buildInfoRow(
+                            icon: Icons.phone,
+                            title: 'Phone',
+                            value: user!['phone'],
+                            primaryColor: primaryColor,
+                          ),
+                        ],
+                        const Divider(height: 20),
+                        _buildInfoRow(
+                          icon: Icons.badge,
+                          title: 'Role',
+                          value: user!['role']?.toString().toUpperCase() ??
+                              'Not set',
+                          primaryColor: primaryColor,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  // Logout Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: logout,
+                      icon: const Icon(Icons.logout, color: Colors.white),
+                      label: const Text(
+                        'Logout',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 2,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow({
+    required IconData icon,
+    required String title,
+    required String value,
+    required Color primaryColor,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, color: primaryColor, size: 24),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+
 /* File: screens\auth\register_screen.dart */
 import 'package:client_customer/screens/auth/login_screen.dart';
 import 'package:flutter/material.dart';
@@ -2455,7 +2703,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       ),
                     ),
 
-                    const SizedBox(height: 100), // Space for the fixed button
+                    const SizedBox(
+                      height: 100,
+                    ), // Space for the fixed button
                   ],
                 ),
               ),
@@ -2611,10 +2861,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                   PayHere.startPayment(
                                     paymentResult['paymentObject'],
                                     (paymentId) async {
-                                      // Payment success callback
-                                      print("Payment Success: $paymentId");
+                                      print(
+                                          "[CheckoutScreen] Payment Success. PaymentId: $paymentId");
+                                      print(
+                                          "[CheckoutScreen] Original order data: $orderData");
 
-                                      // Update order status in backend
                                       final updateResult = await payhereService
                                           .savePaymentDetails(
                                         orderId: orderId,
@@ -2626,17 +2877,26 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                       if (!mounted) return;
 
                                       if (updateResult['success']) {
-                                        // Navigate to confirmation screen
+                                        final confirmationData =
+                                            Map<String, dynamic>.from(
+                                                orderData);
+                                        confirmationData['totalAmount'] =
+                                            totalAmount;
+                                        confirmationData['paymentType'] =
+                                            'Credit Card';
+                                        confirmationData['paymentStatus'] =
+                                            'completed';
+                                        confirmationData['paymentId'] =
+                                            paymentId;
+
+                                        print(
+                                            "[CheckoutScreen] Confirmation data being sent: $confirmationData");
+
                                         await Navigator.pushNamedAndRemoveUntil(
                                           context,
                                           OrderConfirmationScreen.routeName,
                                           (route) => false,
-                                          arguments: {
-                                            ...orderData,
-                                            'paymentStatus': 'completed',
-                                            'paymentId': paymentId,
-                                            'paymentType': 'Credit Card',
-                                          },
+                                          arguments: confirmationData,
                                         );
                                       } else {
                                         ScaffoldMessenger.of(context)
@@ -2817,7 +3077,7 @@ class OrderConfirmationScreen extends StatelessWidget {
                       const Divider(),
                       _buildOrderDetail('Order ID', orderData['_id'] ?? 'N/A'),
                       _buildOrderDetail('Total Amount',
-                          '\$${(orderData['totalAmount'] ?? 0) / 100}'),
+                          '\$${(orderData['totalAmount'] ?? 0).toStringAsFixed(2)}'),
                       _buildOrderDetail(
                           'Payment Method', orderData['paymentType'] ?? 'N/A'),
                     ],
@@ -2887,10 +3147,85 @@ class OrderConfirmationScreen extends StatelessWidget {
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import '../../models/restaurant.dart';
 import '../../providers/restaurant_provider.dart';
 import '../../theme/app_theme.dart';
 import '../cart/cart_screen.dart';
+import '../auth/profile_screen.dart';
+import '../location_picker_screen.dart';
+
+mixin ImageBuilderMixin {
+  final String _baseImageUrl = 'http://10.0.2.2:3001/';
+
+  Widget _buildImage(String? imagePath,
+      {double? width, double? height, BoxFit fit = BoxFit.cover}) {
+    if (imagePath == null || imagePath.isEmpty) {
+      return _buildPlaceholder(width: width, height: height);
+    }
+
+    if (imagePath.startsWith('http')) {
+      return _networkImage(imagePath, width: width, height: height, fit: fit);
+    }
+
+    if (imagePath.contains('uploads')) {
+      return _serverImage(imagePath, width: width, height: height, fit: fit);
+    }
+
+    return _networkImage(imagePath, width: width, height: height, fit: fit);
+  }
+
+  Widget _serverImage(String path,
+      {double? width, double? height, BoxFit? fit}) {
+    final fullUrl = path.startsWith('/')
+        ? _baseImageUrl + path.substring(1)
+        : _baseImageUrl + path;
+
+    return _networkImage(fullUrl, width: width, height: height, fit: fit);
+  }
+
+  Widget _networkImage(String url,
+      {double? width, double? height, BoxFit? fit}) {
+    return Image.network(
+      url,
+      width: width,
+      height: height,
+      fit: fit,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return _buildLoadingPlaceholder(width: width, height: height);
+      },
+      errorBuilder: (context, error, stackTrace) {
+        print('Image load error: $error');
+        return _buildPlaceholder(width: width, height: height);
+      },
+    );
+  }
+
+  Widget _buildPlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      child: const Icon(Icons.restaurant, size: 40, color: Colors.grey),
+    );
+  }
+
+  Widget _buildLoadingPlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      child: Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+        ),
+      ),
+    );
+  }
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -2899,21 +3234,96 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with ImageBuilderMixin {
   int _selectedIndex = 0;
+  LatLng? _selectedLocation;
+  bool _isGettingLocation = false;
 
   @override
   void initState() {
     super.initState();
-    _loadRestaurants();
+    _getCurrentLocation();
   }
 
-  Future<void> _loadRestaurants() async {
-    // In a real app, you would get the user's location
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isGettingLocation = true;
+    });
+
+    try {
+      // Check location permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permissions are denied');
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permissions are permanently denied');
+      }
+
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition();
+      setState(() {
+        _selectedLocation = LatLng(position.latitude, position.longitude);
+      });
+
+      // Load restaurants based on current location
+      await Provider.of<RestaurantProvider>(
+        context,
+        listen: false,
+      ).fetchNearbyRestaurants(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        radius: 5,
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: ${e.toString()}')),
+      );
+      // Load with default location if there's an error
+      await _loadRestaurantsWithDefaultLocation();
+    } finally {
+      setState(() {
+        _isGettingLocation = false;
+      });
+    }
+  }
+
+  Future<void> _loadRestaurantsWithDefaultLocation() async {
     await Provider.of<RestaurantProvider>(
       context,
       listen: false,
-    ).fetchNearbyRestaurants(latitude: 12.9716, longitude: 77.5946, radius: 5);
+    ).fetchNearbyRestaurants(latitude: 6.9271, longitude: 79.8612, radius: 5);
+  }
+
+  Future<void> _openLocationPicker() async {
+    final LatLng? result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LocationPickerScreen(
+          initialLocation: _selectedLocation,
+        ),
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        _selectedLocation = result;
+      });
+
+      // Load restaurants based on selected location
+      await Provider.of<RestaurantProvider>(
+        context,
+        listen: false,
+      ).fetchNearbyRestaurants(
+        latitude: result.latitude,
+        longitude: result.longitude,
+        radius: 5,
+      );
+    }
   }
 
   void _onItemTapped(int index) {
@@ -2926,13 +3336,21 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: _selectedIndex == 0 ? _buildHomeContent() : const CartScreen(),
+      body: _selectedIndex == 0
+          ? _buildHomeContent()
+          : _selectedIndex == 1
+              ? const CartScreen()
+              : const ProfileScreen(),
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(
             icon: Icon(Icons.shopping_cart),
             label: 'Cart',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person),
+            label: 'Profile',
           ),
         ],
         currentIndex: _selectedIndex,
@@ -2987,6 +3405,48 @@ class _HomeScreenState extends State<HomeScreen> {
                       fontWeight: FontWeight.w400,
                     ),
               ),
+              SizedBox(height: 16.h),
+              // Add location buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed:
+                          _isGettingLocation ? null : _getCurrentLocation,
+                      icon: const Icon(Icons.my_location),
+                      label: _isGettingLocation
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : const Text('Current Location'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: AppColors.primary,
+                        padding: EdgeInsets.symmetric(vertical: 10.h),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 8.w),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _openLocationPicker,
+                      icon: const Icon(Icons.map),
+                      label: const Text('Select on Map'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: AppColors.primary,
+                        padding: EdgeInsets.symmetric(vertical: 10.h),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -3006,7 +3466,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text('Error: ${restaurantProvider.errorMessage}'),
                       SizedBox(height: 16.h),
                       ElevatedButton(
-                        onPressed: _loadRestaurants,
+                        onPressed: _getCurrentLocation,
                         child: const Text('Retry'),
                       ),
                     ],
@@ -3025,7 +3485,7 @@ class _HomeScreenState extends State<HomeScreen> {
               );
 
               return RefreshIndicator(
-                onRefresh: _loadRestaurants,
+                onRefresh: _getCurrentLocation,
                 child: ListView.builder(
                   padding: EdgeInsets.symmetric(
                     horizontal: 16.w,
@@ -3055,11 +3515,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _RestaurantCard extends StatelessWidget {
+class _RestaurantCard extends StatelessWidget with ImageBuilderMixin {
   final Restaurant restaurant;
   final VoidCallback onTap;
 
-  const _RestaurantCard({required this.restaurant, required this.onTap});
+  _RestaurantCard({required this.restaurant, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -3069,22 +3529,16 @@ class _RestaurantCard extends StatelessWidget {
         margin: EdgeInsets.only(bottom: 28.h),
         child: Column(
           children: [
-            // Cover image, full width, curved top
             ClipRRect(
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(28.r),
                 topRight: Radius.circular(28.r),
               ),
-              child: Image.network(
+              child: _buildImage(
                 restaurant.coverImage,
                 width: double.infinity,
                 height: 170.h,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  height: 170.h,
-                  color: Colors.grey[200],
-                  child: const Icon(Icons.restaurant, size: 40),
-                ),
               ),
             ),
             // Details tile, full width, curved bottom
@@ -4827,6 +5281,7 @@ class AppColors {
   static const text = Color(0xFF111827);
   static const muted = Color(0xFF6B7280);
   static const border = Color(0xFFE5E7EB);
+  static const lightprime = Color.fromARGB(255, 255, 226, 176); // Shadow color
 }
 
 class AppTheme {
@@ -4937,15 +5392,15 @@ class NetworkException extends AppException {
 
 
 /* File: utils\constants.dart */
-// lib/utils/constants.dart
 class ApiConstants {
   static const String baseUrl = 'http://10.0.2.2:3001/api';
+
   static const String userBaseUrl = 'http://10.0.2.2:3000/api/users';
   static const String restaurantBaseUrl =
       'http://10.0.2.2:3001/api/restaurants';
+
   static const String cartBaseUrl = 'http://10.0.2.2:3001/api/cart';
 }
-
 class AppConstants {
   static const double defaultPadding = 16.0;
   static const double borderRadius = 8.0;

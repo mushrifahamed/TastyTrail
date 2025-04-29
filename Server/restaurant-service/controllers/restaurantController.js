@@ -164,41 +164,109 @@ const getNearbyRestaurants = async (req, res) => {
   const { longitude, latitude, radius } = req.query;
 
   try {
-    // Perform the geospatial query to find nearby restaurants
-    const nearbyRestaurants = await Restaurant.aggregate([
-      {
-        $geoNear: {
-          near: {
-            type: "Point",
-            coordinates: [parseFloat(longitude), parseFloat(latitude)],
+    // Check if valid coordinates are provided
+    const isValidCoordinates =
+      longitude &&
+      latitude &&
+      !isNaN(parseFloat(longitude)) &&
+      !isNaN(parseFloat(latitude));
+
+    if (isValidCoordinates) {
+      // Try to get nearby restaurants first with distance filter
+      let restaurants = await Restaurant.aggregate([
+        {
+          $geoNear: {
+            near: {
+              type: "Point",
+              coordinates: [parseFloat(longitude), parseFloat(latitude)],
+            },
+            distanceField: "distance",
+            maxDistance: parseFloat(radius) * 1000, // Convert to meters
+            spherical: true,
+            includeLocs: "address.geoCoordinates",
           },
-          distanceField: "distance", // Ensure this is added
-          maxDistance: radius * 1000,
-          spherical: true,
-          includeLocs: "address.geoCoordinates", // Include coordinates
         },
-      },
-      {
-        $project: {
+        {
+          $project: {
+            name: 1,
+            description: 1,
+            coverImage: 1,
+            menu: 1,
+            availability: 1,
+            operatingHours: 1,
+            distance: 1,
+          },
+        },
+      ]);
+
+      // If no nearby restaurants found, get all restaurants with distance calculation
+      // This maintains the same format as nearby restaurants
+      if (restaurants.length === 0) {
+        console.log(
+          "No nearby restaurants found, getting all restaurants with distance"
+        );
+        restaurants = await Restaurant.aggregate([
+          {
+            $geoNear: {
+              near: {
+                type: "Point",
+                coordinates: [parseFloat(longitude), parseFloat(latitude)],
+              },
+              distanceField: "distance",
+              // No maxDistance filter here - return all restaurants
+              spherical: true,
+              includeLocs: "address.geoCoordinates",
+            },
+          },
+          {
+            $project: {
+              name: 1,
+              description: 1,
+              coverImage: 1,
+              menu: 1,
+              availability: 1,
+              operatingHours: 1,
+              distance: 1,
+            },
+          },
+        ]);
+      }
+
+      if (restaurants.length === 0) {
+        return res.status(404).json({ message: "No restaurants found" });
+      }
+
+      return res.status(200).json(restaurants);
+    } else {
+      // If coordinates are not valid, just return all restaurants without distance
+      const allRestaurants = await Restaurant.find(
+        {},
+        {
           name: 1,
           description: 1,
           coverImage: 1,
           menu: 1,
           availability: 1,
-          operatingHours: 1, // Explicitly include
-          distance: 1, // Include calculated distance
-        },
-      },
-    ]);
+          operatingHours: 1,
+        }
+      );
 
-    if (nearbyRestaurants.length === 0) {
-      return res.status(404).json({ message: "No nearby restaurants found" });
+      if (allRestaurants.length === 0) {
+        return res.status(404).json({ message: "No restaurants found" });
+      }
+
+      // Add null distance field for format consistency
+      const formattedRestaurants = allRestaurants.map((restaurant) => {
+        const restaurantObj = restaurant.toObject();
+        restaurantObj.distance = null;
+        return restaurantObj;
+      });
+
+      return res.status(200).json(formattedRestaurants);
     }
-
-    res.status(200).json(nearbyRestaurants);
   } catch (err) {
-    console.error("Error fetching nearby restaurants:", err);
-    res.status(500).json({ message: "Error fetching nearby restaurants", err });
+    console.error("Error fetching restaurants:", err);
+    res.status(500).json({ message: "Error fetching restaurants", err });
   }
 };
 

@@ -2,10 +2,85 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import '../../models/restaurant.dart';
 import '../../providers/restaurant_provider.dart';
 import '../../theme/app_theme.dart';
 import '../cart/cart_screen.dart';
+import '../auth/profile_screen.dart';
+import '../location_picker_screen.dart';
+
+mixin ImageBuilderMixin {
+  // Updated base URL to include the restaurant service
+  final String _baseImageUrl = 'http://10.0.2.2:3001/';
+
+  Widget _buildImage(String? imagePath,
+      {double? width, double? height, BoxFit fit = BoxFit.cover}) {
+    if (imagePath == null || imagePath.isEmpty) {
+      return _buildPlaceholder(width: width, height: height);
+    }
+
+    // Handle absolute URLs (like Unsplash)
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      return _networkImage(imagePath, width: width, height: height, fit: fit);
+    }
+
+    // Handle local backend images
+    return _serverImage(imagePath, width: width, height: height, fit: fit);
+  }
+
+  Widget _serverImage(String path,
+      {double? width, double? height, BoxFit? fit}) {
+    // Clean up the path to ensure proper URL construction
+    String cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    final fullUrl = _baseImageUrl + cleanPath;
+
+    print('Loading image from: $fullUrl'); // Debug log
+    return _networkImage(fullUrl, width: width, height: height, fit: fit);
+  }
+
+  Widget _networkImage(String url,
+      {double? width, double? height, BoxFit? fit}) {
+    return Image.network(
+      url,
+      width: width,
+      height: height,
+      fit: fit,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return _buildLoadingPlaceholder(width: width, height: height);
+      },
+      errorBuilder: (context, error, stackTrace) {
+        print('Image load error: $error');
+        return _buildPlaceholder(width: width, height: height);
+      },
+    );
+  }
+
+  Widget _buildPlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      child: const Icon(Icons.restaurant, size: 40, color: Colors.grey),
+    );
+  }
+
+  Widget _buildLoadingPlaceholder({double? width, double? height}) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      child: Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+        ),
+      ),
+    );
+  }
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,21 +89,96 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with ImageBuilderMixin {
   int _selectedIndex = 0;
+  LatLng? _selectedLocation;
+  bool _isGettingLocation = false;
 
   @override
   void initState() {
     super.initState();
-    _loadRestaurants();
+    _getCurrentLocation();
   }
 
-  Future<void> _loadRestaurants() async {
-    // In a real app, you would get the user's location
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isGettingLocation = true;
+    });
+
+    try {
+      // Check location permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permissions are denied');
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permissions are permanently denied');
+      }
+
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition();
+      setState(() {
+        _selectedLocation = LatLng(position.latitude, position.longitude);
+      });
+
+      // Load restaurants based on current location
+      await Provider.of<RestaurantProvider>(
+        context,
+        listen: false,
+      ).fetchNearbyRestaurants(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        radius: 5,
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: ${e.toString()}')),
+      );
+      // Load with default location if there's an error
+      await _loadRestaurantsWithDefaultLocation();
+    } finally {
+      setState(() {
+        _isGettingLocation = false;
+      });
+    }
+  }
+
+  Future<void> _loadRestaurantsWithDefaultLocation() async {
     await Provider.of<RestaurantProvider>(
       context,
       listen: false,
-    ).fetchNearbyRestaurants(latitude: 12.9716, longitude: 77.5946, radius: 5);
+    ).fetchNearbyRestaurants(latitude: 6.9271, longitude: 79.8612, radius: 5);
+  }
+
+  Future<void> _openLocationPicker() async {
+    final LatLng? result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LocationPickerScreen(
+          initialLocation: _selectedLocation,
+        ),
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        _selectedLocation = result;
+      });
+
+      // Load restaurants based on selected location
+      await Provider.of<RestaurantProvider>(
+        context,
+        listen: false,
+      ).fetchNearbyRestaurants(
+        latitude: result.latitude,
+        longitude: result.longitude,
+        radius: 5,
+      );
+    }
   }
 
   void _onItemTapped(int index) {
@@ -41,13 +191,21 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: _selectedIndex == 0 ? _buildHomeContent() : const CartScreen(),
+      body: _selectedIndex == 0
+          ? _buildHomeContent()
+          : _selectedIndex == 1
+              ? const CartScreen()
+              : const ProfileScreen(),
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(
             icon: Icon(Icons.shopping_cart),
             label: 'Cart',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person),
+            label: 'Profile',
           ),
         ],
         currentIndex: _selectedIndex,
@@ -102,6 +260,48 @@ class _HomeScreenState extends State<HomeScreen> {
                       fontWeight: FontWeight.w400,
                     ),
               ),
+              SizedBox(height: 16.h),
+              // Add location buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed:
+                          _isGettingLocation ? null : _getCurrentLocation,
+                      icon: const Icon(Icons.my_location),
+                      label: _isGettingLocation
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : const Text('Current Location'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: AppColors.primary,
+                        padding: EdgeInsets.symmetric(vertical: 10.h),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 8.w),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _openLocationPicker,
+                      icon: const Icon(Icons.map),
+                      label: const Text('Select on Map'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: AppColors.primary,
+                        padding: EdgeInsets.symmetric(vertical: 10.h),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -121,7 +321,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text('Error: ${restaurantProvider.errorMessage}'),
                       SizedBox(height: 16.h),
                       ElevatedButton(
-                        onPressed: _loadRestaurants,
+                        onPressed: _getCurrentLocation,
                         child: const Text('Retry'),
                       ),
                     ],
@@ -140,7 +340,7 @@ class _HomeScreenState extends State<HomeScreen> {
               );
 
               return RefreshIndicator(
-                onRefresh: _loadRestaurants,
+                onRefresh: _getCurrentLocation,
                 child: ListView.builder(
                   padding: EdgeInsets.symmetric(
                     horizontal: 16.w,
@@ -170,11 +370,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _RestaurantCard extends StatelessWidget {
+class _RestaurantCard extends StatelessWidget with ImageBuilderMixin {
   final Restaurant restaurant;
   final VoidCallback onTap;
 
-  const _RestaurantCard({required this.restaurant, required this.onTap});
+  _RestaurantCard({required this.restaurant, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -184,22 +384,16 @@ class _RestaurantCard extends StatelessWidget {
         margin: EdgeInsets.only(bottom: 28.h),
         child: Column(
           children: [
-            // Cover image, full width, curved top
             ClipRRect(
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(28.r),
                 topRight: Radius.circular(28.r),
               ),
-              child: Image.network(
+              child: _buildImage(
                 restaurant.coverImage,
                 width: double.infinity,
                 height: 170.h,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  height: 170.h,
-                  color: Colors.grey[200],
-                  child: const Icon(Icons.restaurant, size: 40),
-                ),
               ),
             ),
             // Details tile, full width, curved bottom
