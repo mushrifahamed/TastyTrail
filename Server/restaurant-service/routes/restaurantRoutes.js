@@ -21,6 +21,19 @@ router.post('/',
     restaurantController.addRestaurant
     );
 
+// Update a restaurant
+router.put('/:id',
+  uploadFields,
+  verifyToken(['admin', 'super_admin']),
+  restaurantController.updateRestaurant
+);
+
+// Delete a restaurant
+router.delete('/:id',
+  verifyToken(['admin', 'super_admin']),
+  restaurantController.deleteRestaurant
+);
+
 // Get nearby restaurants
 router.get("/nearby", restaurantController.getNearbyRestaurants);
 

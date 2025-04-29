@@ -181,6 +181,152 @@ const addRestaurant = async (req, res) => {
   }
 };
 
+// Update a restaurant
+const updateRestaurant = async (req, res) => {
+  console.log("Update request body:", req.body);
+  console.log("Update request files:", req.files);
+
+  try {
+    const { id } = req.params;
+
+    // Validate restaurant ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid restaurant ID" });
+    }
+
+    // Parse incoming data
+    const name = req.body.name;
+    const description = req.body.description;
+    const address = typeof req.body.address === "string" ? JSON.parse(req.body.address) : req.body.address;
+    const operatingHours = typeof req.body.operatingHours === "string" ? JSON.parse(req.body.operatingHours) : req.body.operatingHours;
+    let menu = [];
+    try {
+      menu = typeof req.body.menu === "string" ? JSON.parse(req.body.menu) : req.body.menu || [];
+      if (!Array.isArray(menu)) {
+        throw new Error("Menu must be an array");
+      }
+    } catch (err) {
+      console.error("Error parsing menu:", err);
+      return res.status(400).json({ message: "Invalid menu format" });
+    }
+
+    // Validate required fields
+    if (!name || !address) {
+      return res.status(400).json({ message: "Name and address are required" });
+    }
+
+    // Validate address structure
+    if (
+      !address.geoCoordinates ||
+      isNaN(parseFloat(address.geoCoordinates.longitude)) ||
+      isNaN(parseFloat(address.geoCoordinates.latitude))
+    ) {
+      return res.status(400).json({ message: "Valid geo coordinates are required" });
+    }
+
+    // Check if restaurant exists
+    const restaurant = await Restaurant.findById(id);
+    if (!restaurant) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    // Handle file uploads
+    const coverImage = req.files?.coverImage?.[0]?.path || restaurant.coverImage;
+    const menuItemImages = req.files?.menuItemImages || [];
+
+    // Update restaurant data
+    restaurant.name = name.trim();
+    restaurant.description = description ? description.trim() : "";
+    restaurant.address = {
+      street: address.street ? address.street.trim() : "",
+      city: address.city ? address.city.trim() : "",
+      country: address.country ? address.country.trim() : "",
+      geoCoordinates: {
+        type: "Point",
+        coordinates: [
+          parseFloat(address.geoCoordinates.longitude),
+          parseFloat(address.geoCoordinates.latitude),
+        ],
+      },
+    };
+    restaurant.operatingHours = {
+      from: operatingHours?.from || "09:00",
+      to: operatingHours?.to || "21:00",
+    };
+    restaurant.menu = menu.map((item, index) => ({
+      name: item.name ? item.name.trim() : `Item ${index + 1}`,
+      description: item.description ? item.description.trim() : "",
+      price: parseFloat(item.price) || 0,
+      category: item.category ? item.category.trim() : "other",
+      image: menuItemImages[index]?.path || (restaurant.menu[index]?.image || null),
+    }));
+    restaurant.coverImage = coverImage;
+
+    // Validate coordinates
+    const longitude = parseFloat(address.geoCoordinates.longitude);
+    const latitude = parseFloat(address.geoCoordinates.latitude);
+    if (longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) {
+      return res.status(400).json({ message: "Invalid geo coordinates" });
+    }
+
+    // Save updated restaurant
+    await restaurant.save();
+
+    res.status(200).json({
+      status: "success",
+      data: { restaurant },
+    });
+  } catch (err) {
+    console.error("Error updating restaurant:", err);
+    if (err.code === 11000) {
+      return res.status(400).json({ message: "Restaurant with this name already exists" });
+    }
+    if (err.name === "ValidationError") {
+      return res.status(400).json({
+        message: "Validation failed",
+        error: err.message,
+        details: err.errors,
+      });
+    }
+    res.status(500).json({
+      message: "Error updating restaurant",
+      error: err.message,
+    });
+  }
+};
+
+// Delete a restaurant
+const deleteRestaurant = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate restaurant ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid restaurant ID" });
+    }
+
+    // Check if restaurant exists
+    const restaurant = await Restaurant.findById(id);
+    if (!restaurant) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    // Delete restaurant
+    await Restaurant.deleteOne({ _id: id });
+
+    res.status(204).json({
+      status: "success",
+      data: null,
+    });
+  } catch (err) {
+    console.error("Error deleting restaurant:", err);
+    res.status(500).json({
+      message: "Error deleting restaurant",
+      error: err.message,
+    });
+  }
+};
+
 // Get all restaurants within a certain radius (nearby restaurants)
 const getNearbyRestaurants = async (req, res) => {
   const { longitude, latitude, radius } = req.query;
@@ -564,4 +710,6 @@ module.exports = {
   updateMenuItem,
   deleteMenuItem,
   searchRestaurants,
+  deleteRestaurant,
+  updateRestaurant,
 };

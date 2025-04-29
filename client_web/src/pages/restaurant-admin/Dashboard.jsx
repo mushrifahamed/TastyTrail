@@ -2,7 +2,7 @@ import { useContext, useEffect, useState, useRef } from "react";
 import { restaurantServiceApi } from "../../utils/api";
 import { AuthContext } from "../../context/AuthContext";
 import { toast } from "react-toastify";
-import { MdEdit, MdDelete, MdAddPhotoAlternate, MdImage } from "react-icons/md";
+import { MdEdit, MdDelete } from "react-icons/md";
 
 const RestaurantAdminDashboard = () => {
   const { user } = useContext(AuthContext);
@@ -17,19 +17,25 @@ const RestaurantAdminDashboard = () => {
     description: "",
     price: "",
     category: "main",
-    image: null,
   });
   const [editMode, setEditMode] = useState(false);
   const [currentItemId, setCurrentItemId] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [imagePreview, setImagePreview] = useState(null);
-  const fileInputRef = useRef(null);
-
-  const API_BASE_URL = "http://localhost:3001";
+  const [formErrors, setFormErrors] = useState({});
+  const retryCountRef = useRef(0);
+  const maxRetries = 3;
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!user?.restaurantId) {
+      if (!user || !user.restaurantId) {
+        if (retryCountRef.current < maxRetries) {
+          retryCountRef.current += 1;
+          setTimeout(() => {
+            console.log(`Retrying fetch (attempt ${retryCountRef.current}/${maxRetries})...`);
+            fetchData();
+          }, 1000);
+          return;
+        }
         setError("No restaurant ID found for this user");
         setLoading(false);
         toast.error("No restaurant ID found", { theme: "colored" });
@@ -51,6 +57,7 @@ const RestaurantAdminDashboard = () => {
         setRestaurant(restaurantData);
         const menu = restaurantData.menu || [];
         setMenuItems(Array.isArray(menu) ? menu : []);
+        retryCountRef.current = 0;
       } catch (err) {
         console.error("Fetch error:", err);
         console.error("Error response:", err.response?.data);
@@ -64,35 +71,29 @@ const RestaurantAdminDashboard = () => {
     fetchData();
   }, [user]);
 
+  const validateForm = () => {
+    const errors = {};
+    if (!newMenuItem.name.trim()) errors.name = "Name is required";
+    if (!newMenuItem.price || parseFloat(newMenuItem.price) <= 0) errors.price = "Price must be a positive number";
+    if (newMenuItem.description && newMenuItem.description.length > 200) errors.description = "Description must be 200 characters or less";
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setNewMenuItem((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handleImageChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setNewMenuItem((prev) => ({ ...prev, image: file }));
-      setImagePreview(URL.createObjectURL(file));
-    }
+    setFormErrors((prev) => ({ ...prev, [name]: null }));
   };
 
   const handleAddMenuItem = async (e) => {
     e.preventDefault();
-    try {
-      const formData = new FormData();
-      formData.append("name", newMenuItem.name);
-      formData.append("description", newMenuItem.description);
-      formData.append("price", newMenuItem.price);
-      formData.append("category", newMenuItem.category);
-      if (newMenuItem.image) {
-        formData.append("menuItemImage", newMenuItem.image);
-      }
+    if (!validateForm()) return;
 
+    try {
       const response = await restaurantServiceApi.post(
         `/api/restaurants/${user.restaurantId}/menu`,
-        formData,
-        { headers: { "Content-Type": "multipart/form-data" } }
+        newMenuItem
       );
 
       console.log("Add menu item response:", response);
@@ -122,28 +123,18 @@ const RestaurantAdminDashboard = () => {
       description: item.description || "",
       price: item.price ? item.price.toString() : "",
       category: item.category || "main",
-      image: null,
     });
-    setImagePreview(item.image ? getImageUrl(item.image) : null);
     setShowModal(true);
   };
 
   const handleUpdateMenuItem = async (e) => {
     e.preventDefault();
-    try {
-      const formData = new FormData();
-      formData.append("name", newMenuItem.name);
-      formData.append("description", newMenuItem.description);
-      formData.append("price", newMenuItem.price);
-      formData.append("category", newMenuItem.category);
-      if (newMenuItem.image) {
-        formData.append("menuItemImage", newMenuItem.image);
-      }
+    if (!validateForm()) return;
 
+    try {
       const response = await restaurantServiceApi.put(
         `/api/restaurants/${user.restaurantId}/menu/${currentItemId}`,
-        formData,
-        { headers: { "Content-Type": "multipart/form-data" } }
+        newMenuItem
       );
 
       console.log("Update menu item response:", response);
@@ -185,19 +176,8 @@ const RestaurantAdminDashboard = () => {
       description: "",
       price: "",
       category: "main",
-      image: null,
     });
-    setImagePreview(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = null;
-    }
-  };
-
-  const getImageUrl = (imagePath) => {
-    if (!imagePath) return null;
-    if (imagePath.startsWith("http")) return imagePath;
-    const path = imagePath.startsWith("/") ? imagePath : `/${imagePath}`;
-    return `${API_BASE_URL}${path}`;
+    setFormErrors({});
   };
 
   const getCategoryBadgeColor = (category) => {
@@ -275,6 +255,7 @@ const RestaurantAdminDashboard = () => {
               className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              aria-label="Search menu items"
             />
           </div>
         </div>
@@ -300,6 +281,7 @@ const RestaurantAdminDashboard = () => {
                         ? "border-blue-500 text-blue-600"
                         : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                     }`}
+                    aria-label={`Filter by ${tabLabels[tab]}`}
                   >
                     {tabLabels[tab]}
                   </button>
@@ -317,6 +299,7 @@ const RestaurantAdminDashboard = () => {
               setShowModal(true);
             }}
             className="inline-flex items-center px-3 py-1 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+            aria-label="Add new menu item"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -331,9 +314,6 @@ const RestaurantAdminDashboard = () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Image
-                  </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Name
                   </th>
@@ -355,27 +335,6 @@ const RestaurantAdminDashboard = () => {
                 {filteredMenuItems.length > 0 ? (
                   filteredMenuItems.map((item) => (
                     <tr key={item._id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          {item.image ? (
-                            <img
-                              src={getImageUrl(item.image)}
-                              alt={item.name}
-                              className="h-10 w-10 rounded-full object-cover"
-                              onError={(e) => {
-                                console.log("Image failed to load:", item.image);
-                                e.target.src = "";
-                                e.target.className = "h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center";
-                                e.target.nextSibling.style.display = "block";
-                              }}
-                            />
-                          ) : (
-                            <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                              <MdImage className="text-gray-400" />
-                            </div>
-                          )}
-                        </div>
-                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{item.name}</div>
                       </td>
@@ -414,7 +373,7 @@ const RestaurantAdminDashboard = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="6" className="px-6 py-8 text-center">
+                    <td colSpan="5" className="px-6 py-8 text-center">
                       <div className="flex flex-col items-center justify-center">
                         <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -445,10 +404,16 @@ const RestaurantAdminDashboard = () => {
                     name="name"
                     value={newMenuItem.name}
                     onChange={handleInputChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className={`mt-1 block w-full border border-gray-300 rounded-lg shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                      formErrors.name ? "border-red-500" : ""
+                    }`}
                     required
                     placeholder="Enter item name"
+                    aria-describedby={formErrors.name ? "name-error" : undefined}
                   />
+                  {formErrors.name && (
+                    <p id="name-error" className="mt-1 text-sm text-red-600">{formErrors.name}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Category</label>
@@ -474,10 +439,16 @@ const RestaurantAdminDashboard = () => {
                     onChange={handleInputChange}
                     step="0.01"
                     min="0"
-                    className="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className={`mt-1 block w-full border border-gray-300 rounded-lg shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                      formErrors.price ? "border-red-500" : ""
+                    }`}
                     required
                     placeholder="Enter price"
+                    aria-describedby={formErrors.price ? "price-error" : undefined}
                   />
+                  {formErrors.price && (
+                    <p id="price-error" className="mt-1 text-sm text-red-600">{formErrors.price}</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Description</label>
@@ -486,34 +457,16 @@ const RestaurantAdminDashboard = () => {
                     name="description"
                     value={newMenuItem.description}
                     onChange={handleInputChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-lg shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Enter description"
+                    className={`mt-1 block w-full border border-gray-300 rounded-lg shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                      formErrors.description ? "border-red-500" : ""
+                    }`}
+                    placeholder="Enter description (optional)"
+                    maxLength="200"
+                    aria-describedby={formErrors.description ? "description-error" : undefined}
                   />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    {editMode ? "Update Image (optional)" : "Image"}
-                  </label>
-                  <div className="mt-1 flex items-center space-x-4">
-                    <label className="cursor-pointer inline-flex items-center px-3 py-1 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
-                      <MdAddPhotoAlternate className="h-4 w-4 mr-1" />
-                      {newMenuItem.image ? newMenuItem.image.name : "Choose Image"}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleImageChange}
-                        className="sr-only"
-                        ref={fileInputRef}
-                      />
-                    </label>
-                    {imagePreview && (
-                      <img
-                        src={imagePreview}
-                        alt="Preview"
-                        className="h-10 w-10 rounded-full object-cover"
-                      />
-                    )}
-                  </div>
+                  {formErrors.description && (
+                    <p id="description-error" className="mt-1 text-sm text-red-600">{formErrors.description}</p>
+                  )}
                 </div>
                 <div className="flex justify-end space-x-3">
                   <button
@@ -523,12 +476,14 @@ const RestaurantAdminDashboard = () => {
                       setShowModal(false);
                     }}
                     className="inline-flex items-center px-3 py-1 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                    aria-label="Cancel"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     className="inline-flex items-center px-3 py-1 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+                    aria-label={editMode ? "Update menu item" : "Add menu item"}
                   >
                     {editMode ? "Update Item" : "Add Item"}
                   </button>

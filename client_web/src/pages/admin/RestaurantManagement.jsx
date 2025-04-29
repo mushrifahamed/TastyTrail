@@ -93,6 +93,7 @@ const RestaurantManagement = () => {
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [position, setPosition] = useState(null);
   const [isFetchingAddress, setIsFetchingAddress] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
 
   // Set default position to a reasonable location (e.g., Colombo, Sri Lanka)
   const defaultPosition = [6.9271, 79.8612];
@@ -322,35 +323,7 @@ const RestaurantManagement = () => {
         setRestaurants(newRestaurants);
         setFilteredRestaurants(newRestaurants);
         
-        setNewRestaurant({
-          name: "",
-          description: "",
-          address: {
-            street: "",
-            city: "",
-            country: "",
-            geoCoordinates: {
-              longitude: "",
-              latitude: "",
-            },
-          },
-          operatingHours: {
-            from: "",
-            to: ""
-          },
-          menu: [
-            {
-              name: "",
-              description: "",
-              price: "",
-              category: "",
-              image: null
-            }
-          ]
-        });
-        setCoverImage(null);
-        setMenuItemImages([]);
-        setPosition(null);
+        resetForm();
         setShowModal(false);
       }
     } catch (err) {
@@ -363,6 +336,143 @@ const RestaurantManagement = () => {
     }
   };
 
+  const handleEditRestaurant = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      
+      // Append fields that can be edited
+      formData.append("name", newRestaurant.name.trim());
+      formData.append("description", newRestaurant.description?.trim() || '');
+      formData.append("operatingHours", JSON.stringify({
+        from: newRestaurant.operatingHours.from || '09:00',
+        to: newRestaurant.operatingHours.to || '21:00'
+      }));
+
+      // Keep existing address and menu
+      formData.append("address", JSON.stringify(selectedRestaurant.address));
+      formData.append("menu", JSON.stringify(selectedRestaurant.menu));
+
+      // Handle cover image if changed
+      if (coverImage) {
+        if (!coverImage.type.match('image.*')) {
+          throw new Error('Cover image must be an image file');
+        }
+        formData.append("coverImage", coverImage);
+      }
+
+      const response = await restaurantServiceApi.put(`/api/restaurants/${selectedRestaurant._id}`, formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        timeout: 10000
+      });
+
+      if (response.data?.status === 'success') {
+        const restaurantResponse = await restaurantServiceApi.get("/api/restaurants");
+        const updatedRestaurants = restaurantResponse.data.data.restaurants;
+        setRestaurants(updatedRestaurants);
+        setFilteredRestaurants(updatedRestaurants);
+        
+        resetForm();
+        setShowModal(false);
+        setIsEditMode(false);
+      }
+    } catch (err) {
+      console.error("Error updating restaurant:", err);
+      setError(err.response?.data?.message || 
+              err.message || 
+              "Error updating restaurant. Please check your inputs and try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteRestaurant = async (restaurantId) => {
+    if (!window.confirm("Are you sure you want to delete this restaurant?")) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await restaurantServiceApi.delete(`/api/restaurants/${restaurantId}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        timeout: 10000
+      });
+
+      if (response.status === 204) {
+        const restaurantResponse = await restaurantServiceApi.get("/api/restaurants");
+        const updatedRestaurants = restaurantResponse.data.data.restaurants;
+        setRestaurants(updatedRestaurants);
+        setFilteredRestaurants(updatedRestaurants);
+      }
+    } catch (err) {
+      console.error("Error deleting restaurant:", err);
+      setError(err.response?.data?.message || 
+              err.message || 
+              "Error deleting restaurant. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetForm = () => {
+    setNewRestaurant({
+      name: "",
+      description: "",
+      address: {
+        street: "",
+        city: "",
+        country: "",
+        geoCoordinates: {
+          longitude: "",
+          latitude: "",
+        },
+      },
+      operatingHours: {
+        from: "",
+        to: ""
+      },
+      menu: [
+        {
+          name: "",
+          description: "",
+          price: "",
+          category: "",
+          image: null
+        }
+      ]
+    });
+    setCoverImage(null);
+    setMenuItemImages([]);
+    setPosition(null);
+  };
+
+  const openEditModal = (restaurant) => {
+    setSelectedRestaurant(restaurant);
+    setNewRestaurant({
+      name: restaurant.name,
+      description: restaurant.description,
+      address: restaurant.address,
+      operatingHours: restaurant.operatingHours,
+      menu: restaurant.menu
+    });
+    setPosition({
+      lat: restaurant.address.geoCoordinates.coordinates[1],
+      lng: restaurant.address.geoCoordinates.coordinates[0]
+    });
+    setIsEditMode(true);
+    setShowModal(true);
+  };
+
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       <div className="max-w-7xl mx-auto">
@@ -370,7 +480,11 @@ const RestaurantManagement = () => {
           <h1 className="text-3xl font-bold text-gray-800">Restaurant Management</h1>
           <button
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg shadow-md transition duration-200"
-            onClick={() => setShowModal(true)}
+            onClick={() => {
+              resetForm();
+              setIsEditMode(false);
+              setShowModal(true);
+            }}
           >
             + Create Restaurant
           </button>
@@ -387,9 +501,15 @@ const RestaurantManagement = () => {
             <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
               <div className="p-6">
                 <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-2xl font-semibold text-gray-800">Create New Restaurant</h2>
+                  <h2 className="text-2xl font-semibold text-gray-800">
+                    {isEditMode ? 'Edit Restaurant' : 'Create New Restaurant'}
+                  </h2>
                   <button 
-                    onClick={() => setShowModal(false)}
+                    onClick={() => {
+                      setShowModal(false);
+                      setIsEditMode(false);
+                      resetForm();
+                    }}
                     className="text-gray-500 hover:text-gray-700"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -398,7 +518,7 @@ const RestaurantManagement = () => {
                   </button>
                 </div>
                 
-                <form onSubmit={handleCreateRestaurant} className="space-y-6">
+                <form onSubmit={isEditMode ? handleEditRestaurant : handleCreateRestaurant} className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Restaurant Name*</label>
@@ -427,92 +547,96 @@ const RestaurantManagement = () => {
                     </div>
                   </div>
 
-                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-3">Location</h3>
-                    <p className="text-sm text-gray-600 mb-4">
-                      Click on the map to select the restaurant location. Address fields will be automatically filled.
-                    </p>
-                    <div className="h-64 w-full rounded-lg overflow-hidden">
-                      <MapContainer 
-                        center={defaultPosition} 
-                        zoom={13} 
-                        style={{ height: '100%', width: '100%' }}
-                        className="z-0"
-                      >
-                        <TileLayer
-                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                        />
-                        <LocationMarker 
-                          position={position ? [position.lat, position.lng] : null} 
-                          setPosition={setPosition}
-                          setAddressFromCoordinates={setAddressFromCoordinates}
-                        />
-                      </MapContainer>
-                    </div>
-                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Latitude</label>
-                        <input
-                          type="text"
-                          value={position ? position.lat.toFixed(6) : ''}
-                          readOnly
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100"
-                        />
+                  {!isEditMode && (
+                    <>
+                      <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Location</h3>
+                        <p className="text-sm text-gray-600 mb-4">
+                          Click on the map to select the restaurant location. Address fields will be automatically filled.
+                        </p>
+                        <div className="h-64 w-full rounded-lg overflow-hidden">
+                          <MapContainer 
+                            center={defaultPosition} 
+                            zoom={13} 
+                            style={{ height: '100%', width: '100%' }}
+                            className="z-0"
+                          >
+                            <TileLayer
+                              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                              attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                            />
+                            <LocationMarker 
+                              position={position ? [position.lat, position.lng] : null} 
+                              setPosition={setPosition}
+                              setAddressFromCoordinates={setAddressFromCoordinates}
+                            />
+                          </MapContainer>
+                        </div>
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Latitude</label>
+                            <input
+                              type="text"
+                              value={position ? position.lat.toFixed(6) : ''}
+                              readOnly
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Longitude</label>
+                            <input
+                              type="text"
+                              value={position ? position.lng.toFixed(6) : ''}
+                              readOnly
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100"
+                            />
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Longitude</label>
-                        <input
-                          type="text"
-                          value={position ? position.lng.toFixed(6) : ''}
-                          readOnly
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100"
-                        />
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-3">Address Details</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Street*</label>
-                        <input
-                          type="text"
-                          name="street"
-                          value={newRestaurant.address.street}
-                          onChange={handleAddressChange}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          required
-                          placeholder="Street address"
-                        />
+                      <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Address Details</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Street*</label>
+                            <input
+                              type="text"
+                              name="street"
+                              value={newRestaurant.address.street}
+                              onChange={handleAddressChange}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              required
+                              placeholder="Street address"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">City*</label>
+                            <input
+                              type="text"
+                              name="city"
+                              value={newRestaurant.address.city}
+                              onChange={handleAddressChange}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              required
+                              placeholder="City"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Country*</label>
+                            <input
+                              type="text"
+                              name="country"
+                              value={newRestaurant.address.country}
+                              onChange={handleAddressChange}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              required
+                              placeholder="Country"
+                            />
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">City*</label>
-                        <input
-                          type="text"
-                          name="city"
-                          value={newRestaurant.address.city}
-                          onChange={handleAddressChange}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          required
-                          placeholder="City"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Country*</label>
-                        <input
-                          type="text"
-                          name="country"
-                          value={newRestaurant.address.country}
-                          onChange={handleAddressChange}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          required
-                          placeholder="Country"
-                        />
-                      </div>
-                    </div>
-                  </div>
+                    </>
+                  )}
 
                   <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                     <h3 className="text-lg font-semibold text-gray-800 mb-3">Operating Hours</h3>
@@ -542,100 +666,102 @@ const RestaurantManagement = () => {
                     </div>
                   </div>
 
-                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-lg font-semibold text-gray-800">Menu Items</h3>
-                      <button
-                        type="button"
-                        onClick={addMenuItem}
-                        className="flex items-center text-blue-600 hover:text-blue-800"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
-                        </svg>
-                        Add Item
-                      </button>
-                    </div>
-
-                    {newRestaurant.menu.map((item, index) => (
-                      <div key={index} className="bg-white p-4 mb-4 rounded-lg border border-gray-200">
-                        <div className="flex justify-between items-center mb-3">
-                          <h4 className="font-medium text-gray-700">Menu Item #{index + 1}</h4>
-                          <button
-                            type="button"
-                            onClick={() => removeMenuItem(index)}
-                            className="text-red-500 hover:text-red-700 text-sm flex items-center"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                            </svg>
-                            Remove
-                          </button>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Item Name*</label>
-                            <input
-                              type="text"
-                              name="name"
-                              value={item.name}
-                              onChange={(e) => handleMenuItemChange(index, e)}
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              required
-                              placeholder="e.g. Cheeseburger"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Category*</label>
-                            <input
-                              type="text"
-                              name="category"
-                              value={item.category}
-                              onChange={(e) => handleMenuItemChange(index, e)}
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              required
-                              placeholder="e.g. Burgers"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Price*</label>
-                            <input
-                              type="number"
-                              name="price"
-                              value={item.price}
-                              onChange={(e) => handleMenuItemChange(index, e)}
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              step="0.01"
-                              min="0"
-                              required
-                              placeholder="0.00"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                            <input
-                              type="text"
-                              name="description"
-                              value={item.description}
-                              onChange={(e) => handleMenuItemChange(index, e)}
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              placeholder="Item description"
-                            />
-                          </div>
-                          <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Image</label>
-                            <input
-                              type="file"
-                              onChange={(e) => handleMenuItemImageChange(index, e)}
-                              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              accept="image/*"
-                            />
-                          </div>
-                        </div>
+                  {!isEditMode && (
+                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-semibold text-gray-800">Menu Items</h3>
+                        <button
+                          type="button"
+                          onClick={addMenuItem}
+                          className="flex items-center text-blue-600 hover:text-blue-800"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+                          </svg>
+                          Add Item
+                        </button>
                       </div>
-                    ))}
-                  </div>
+
+                      {newRestaurant.menu.map((item, index) => (
+                        <div key={index} className="bg-white p-4 mb-4 rounded-lg border border-gray-200">
+                          <div className="flex justify-between items-center mb-3">
+                            <h4 className="font-medium text-gray-700">Menu Item #{index + 1}</h4>
+                            <button
+                              type="button"
+                              onClick={() => removeMenuItem(index)}
+                              className="text-red-500 hover:text-red-700 text-sm flex items-center"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                              Remove
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Item Name*</label>
+                              <input
+                                type="text"
+                                name="name"
+                                value={item.name}
+                                onChange={(e) => handleMenuItemChange(index, e)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                required
+                                placeholder="e.g. Cheeseburger"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Category*</label>
+                              <input
+                                type="text"
+                                name="category"
+                                value={item.category}
+                                onChange={(e) => handleMenuItemChange(index, e)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                required
+                                placeholder="e.g. Burgers"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Price*</label>
+                              <input
+                                type="number"
+                                name="price"
+                                value={item.price}
+                                onChange={(e) => handleMenuItemChange(index, e)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                step="0.01"
+                                min="0"
+                                required
+                                placeholder="0.00"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                              <input
+                                type="text"
+                                name="description"
+                                value={item.description}
+                                onChange={(e) => handleMenuItemChange(index, e)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                placeholder="Item description"
+                              />
+                            </div>
+                            <div className="md:col-span-2">
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Image</label>
+                              <input
+                                type="file"
+                                onChange={(e) => handleMenuItemImageChange(index, e)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                accept="image/*"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -651,7 +777,6 @@ const RestaurantManagement = () => {
                           file:text-sm file:font-semibold
                           file:bg-blue-50 file:text-blue-700
                           hover:file:bg-blue-100"
-                        required
                         accept="image/*"
                       />
                     </div>
@@ -661,7 +786,11 @@ const RestaurantManagement = () => {
                   <div className="flex justify-end space-x-4 pt-4">
                     <button
                       type="button"
-                      onClick={() => setShowModal(false)}
+                      onClick={() => {
+                        setShowModal(false);
+                        setIsEditMode(false);
+                        resetForm();
+                      }}
                       className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition duration-200"
                     >
                       Cancel
@@ -677,9 +806,9 @@ const RestaurantManagement = () => {
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                           </svg>
-                          Creating...
+                          {isEditMode ? 'Updating...' : 'Creating...'}
                         </span>
-                      ) : 'Create Restaurant'}
+                      ) : (isEditMode ? 'Update Restaurant' : 'Create Restaurant')}
                     </button>
                   </div>
                 </form>
@@ -770,13 +899,19 @@ const RestaurantManagement = () => {
                           </svg>
                           Admins
                         </button>
-                        <button className="text-yellow-600 hover:text-yellow-900 flex items-center">
+                        <button 
+                          onClick={() => openEditModal(restaurant)}
+                          className="text-yellow-600 hover:text-yellow-900 flex items-center"
+                        >
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
                           Edit
                         </button>
-                        <button className="text-red-600 hover:text-red-900 flex items-center">
+                        <button 
+                          onClick={() => handleDeleteRestaurant(restaurant._id)}
+                          className="text-red-600 hover:text-red-900 flex items-center"
+                        >
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>

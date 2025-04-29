@@ -28,6 +28,7 @@ const adminLinks = [
 const restaurantAdminLinks = [
   { name: "Dashboard", path: "/restaurant-admin", icon: <MdDashboard /> },
   { name: "Profile", path: "/restaurant-admin/profile", icon: <MdPerson /> },
+  { name: "Orders", path: "/restaurant-admin/orders", icon: <MdShoppingCart /> },
 ];
 
 const Sidebar = ({ role }) => {
