@@ -328,26 +328,17 @@ const getRestaurantById = async (req, res) => {
   }
 
   try {
-    console.log("Fetching restaurant with ID:", req.params.id); // Debugging log
+    console.log("Fetching restaurant with ID:", req.params.id);
     const restaurant = await Restaurant.findById(req.params.id);
-    //console.log("Fetched restaurant:", restaurant); // Debugging log
+    console.log("Fetched restaurant:", restaurant);
+
     if (!restaurant) {
       console.log("Restaurant not found");
       return res.status(404).json({ message: "Restaurant not found" });
-      // Debugging log
     }
 
-    console.log("Restaurant found:", restaurant); // Debugging log
-
     res.status(200).json({
-      status: "success",
-      data: {
-        exists: true,
-        restaurant: {
-          id: restaurant._id,
-          name: restaurant.name,
-        },
-      },
+      restaurant,
     });
   } catch (err) {
     console.error("Error verifying restaurant:", err);

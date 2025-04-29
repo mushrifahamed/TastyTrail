@@ -351,12 +351,14 @@ class _HomeScreenState extends State<HomeScreen> with ImageBuilderMixin {
                 );
               }
 
-              final restaurants = restaurantProvider.restaurants;
+              final restaurants = [
+                ...restaurantProvider.restaurants
+              ]; // Create a modifiable copy
               if (restaurants.isEmpty) {
                 return const Center(child: Text('No restaurants found'));
               }
 
-              // Sort restaurants by distance
+              // Now sorting the modifiable copy is allowed
               restaurants.sort(
                 (a, b) => (a.distance ?? 0).compareTo(b.distance ?? 0),
               );

@@ -1,127 +1,95 @@
 // lib/providers/restaurant_provider.dart
-import 'dart:convert';
-
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import '../models/restaurant.dart';
 import '../services/restaurant_service.dart';
 
-enum RestaurantLoadingStatus { initial, loading, loaded, error }
-
+/// Provider class that manages restaurant-related state and API calls
 class RestaurantProvider with ChangeNotifier {
   final RestaurantService _restaurantService = RestaurantService();
-
   List<Restaurant> _restaurants = [];
-  Restaurant? _selectedRestaurant;
-  RestaurantLoadingStatus _status = RestaurantLoadingStatus.initial;
+  bool _isLoading = false;
   String? _errorMessage;
 
-  List<Restaurant> get restaurants => _restaurants;
-  Restaurant? get selectedRestaurant => _selectedRestaurant;
-  RestaurantLoadingStatus get status => _status;
-  String? get errorMessage => _errorMessage;
-  bool get isLoading => _status == RestaurantLoadingStatus.loading;
+  /// Gets the list of restaurants
+  List<Restaurant> get restaurants => List.unmodifiable(_restaurants);
 
+  /// Gets the loading state
+  bool get isLoading => _isLoading;
+
+  /// Gets the current error message, if any
+  String? get errorMessage => _errorMessage;
+
+  /// Fetches restaurants near the specified location
   Future<void> fetchNearbyRestaurants({
     required double latitude,
     required double longitude,
     required double radius,
   }) async {
-    _status = RestaurantLoadingStatus.loading;
-    _errorMessage = null;
-    notifyListeners();
-
     try {
+      _setLoading(true);
       _restaurants = await _restaurantService.getNearbyRestaurants(
         latitude: latitude,
         longitude: longitude,
         radius: radius,
       );
-      _status = RestaurantLoadingStatus.loaded;
+      _setLoading(false);
     } catch (e) {
-      _errorMessage = e.toString();
-      _status = RestaurantLoadingStatus.error;
-      _restaurants = [];
+      _handleError('Failed to fetch nearby restaurants: ${e.toString()}');
     }
-    notifyListeners();
   }
 
-  Future<void> fetchRestaurantById(String id) async {
-    _status = RestaurantLoadingStatus.loading;
-    _errorMessage = null;
-    notifyListeners();
-
+  /// Fetches a specific restaurant by its ID
+  Future<Restaurant?> getRestaurantById(String id) async {
     try {
       final restaurant = await _restaurantService.getRestaurantById(id);
 
-      // Ensure menu items have valid IDs
-      for (var i = 0; i < restaurant.menu.length; i++) {
-        if (restaurant.menu[i].id.isEmpty) {
-          // If the backend didn't provide an ID, create a temporary one
-          restaurant.menu[i] = MenuItem(
-            id: 'temp_id_$i',
-            name: restaurant.menu[i].name,
-            description: restaurant.menu[i].description,
-            price: restaurant.menu[i].price,
-            image: restaurant.menu[i].image,
-          );
-        }
+      // Debug logging
+      print('DEBUG: Restaurant fetched successfully:');
+      print('- ID: ${restaurant.id}');
+      print('- Name: ${restaurant.name}');
+      print('- Description: ${restaurant.description}');
+      print('- Cover Image: ${restaurant.coverImage}');
+      print(
+          '- Operating Hours: ${restaurant.operatingHours?.from} - ${restaurant.operatingHours?.to}');
+      print('- Menu Items Count: ${restaurant.menu.length}');
+
+      // Log menu items if present
+      if (restaurant.menu.isNotEmpty) {
+        print('\nMenu Items:');
+        restaurant.menu.forEach((item) {
+          print('  * ${item.name} - \$${item.price}');
+        });
       }
 
-      _selectedRestaurant = restaurant;
-      _status = RestaurantLoadingStatus.loaded;
+      return restaurant;
     } catch (e) {
-      _errorMessage = e.toString();
-      _status = RestaurantLoadingStatus.error;
-      _selectedRestaurant = null;
+      _handleError('Failed to fetch restaurant details: ${e.toString()}');
+      return null;
     }
-    notifyListeners();
   }
 
+  /// Searches for restaurants based on query
   Future<void> searchRestaurants(String query) async {
-    _status = RestaurantLoadingStatus.loading;
+    try {
+      _setLoading(true);
+      _restaurants = await _restaurantService.searchRestaurants(query);
+      _setLoading(false);
+    } catch (e) {
+      _handleError('Failed to search restaurants: ${e.toString()}');
+    }
+  }
+
+  /// Helper method to update loading state
+  void _setLoading(bool value) {
+    _isLoading = value;
     _errorMessage = null;
     notifyListeners();
-
-    try {
-      _restaurants = await _restaurantService.searchRestaurants(query);
-      _status = RestaurantLoadingStatus.loaded;
-    } catch (e) {
-      _errorMessage = e.toString();
-      _status = RestaurantLoadingStatus.error;
-      _restaurants = [];
-    }
-    notifyListeners();
   }
 
-  void clearSelectedRestaurant() {
-    _selectedRestaurant = null;
+  /// Helper method to handle errors
+  void _handleError(String message) {
+    _isLoading = false;
+    _errorMessage = message;
     notifyListeners();
-  }
-
-  Future<Restaurant> getRestaurantById(String restaurantId) async {
-    print('Getting restaurant details for ID: $restaurantId');
-
-    try {
-      final response = await http.get(
-        Uri.parse('http://10.0.2.2:3001/api/restaurants/$restaurantId'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        print('Restaurant API response received');
-        final data = json.decode(response.body);
-        return Restaurant.fromJson(data);
-      } else {
-        print('API error status: ${response.statusCode}');
-        throw Exception(
-            'Failed to load restaurant details: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('Error fetching restaurant: $e');
-      throw Exception('Error fetching restaurant: $e');
-    }
   }
 }

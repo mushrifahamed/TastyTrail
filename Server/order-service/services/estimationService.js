@@ -1,56 +1,92 @@
 const axios = require("axios");
 const { RESTAURANT_SERVICE_URL } = process.env;
 
-module.exports = {
-  calculateEstimatedTime: async (items, deliveryLocation, restaurantId) => {
-    if (!items || !Array.isArray(items)) {
-      console.log("Warning: items is undefined or not an array");
-      return { estimatedTime: 30 }; // Default value
-    }
-    if (!restaurantId) {
-      throw new Error("restaurantId is required for estimation");
+const calculateEstimatedTime = async (
+  items,
+  deliveryLocation,
+  restaurantId
+) => {
+  try {
+    console.log("Fetching restaurant details for ID:", restaurantId);
+
+    // Fetch restaurant data from restaurant service
+    const response = await axios.get(
+      `${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`
+    );
+
+    if (!response.data || !response.data.restaurant) {
+      throw new Error("Restaurant data not found");
     }
 
-    console.log("Calculating estimated time for items:", items);
-    console.log("restaurantId:", restaurantId);
+    const restaurant = response.data.restaurant;
+    console.log("Restaurant data received:", restaurant);
 
-    // 1. Calculate preparation time (10 mins per item)
+    // Validate restaurant has location data
+    if (!restaurant.address?.geoCoordinates?.coordinates) {
+      throw new Error("Restaurant coordinates not found");
+    }
+
+    // Validate delivery location
+    if (!deliveryLocation?.coordinates) {
+      throw new Error("Delivery coordinates not provided");
+    }
+
+    const restaurantCoords = restaurant.address.geoCoordinates.coordinates;
+    const deliveryCoords = deliveryLocation.coordinates;
+
+    console.log("Restaurant coordinates:", restaurantCoords);
+    console.log("Delivery coordinates:", deliveryCoords);
+
+    // Calculate base preparation time (5 mins per item)
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
-    const preparationTime = totalItems * 10; // in minutes
+    const preparationTime = totalItems * 5;
 
-    // 2. Get restaurant location from restaurant service
-    const restaurantLocation = await axios
-      .get(`${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`)
-      .then((res) => res.data.address.geoCoordinates);
+    // Calculate distance and delivery time
+    const distance = calculateDistance(
+      restaurantCoords[1], // latitude
+      restaurantCoords[0], // longitude
+      deliveryCoords[1], // latitude
+      deliveryCoords[0] // longitude
+    );
 
-    // 3. Calculate distance (simple straight-line calculation)
-    const [restaurantLong, restaurantLat] = restaurantLocation.coordinates;
-    const [deliveryLong, deliveryLat] = deliveryLocation.coordinates;
+    // Assume average speed of 30 km/h
+    const deliveryTime = Math.ceil((distance / 30) * 60);
 
-    // Haversine formula
-    const R = 6371; // Earth's radius in km
-    const dLat = ((deliveryLat - restaurantLat) * Math.PI) / 180;
-    const dLon = ((deliveryLong - restaurantLong) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos((restaurantLat * Math.PI) / 180) *
-        Math.cos((deliveryLat * Math.PI) / 180) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const distance = R * c; // Distance in km
+    // Total estimated time in minutes
+    const totalEstimatedTime = preparationTime + deliveryTime;
 
-    // 4. Estimate delivery time (assuming 30 km/h average speed)
-    const travelTimeMinutes = (distance / 30) * 60;
-
-    // 5. Total estimated time
-    return {
+    console.log("Estimated delivery time:", {
       preparationTime,
-      travelTime: Math.round(travelTimeMinutes),
-      totalEstimatedTime: Math.round(preparationTime + travelTimeMinutes),
-      estimatedDeliveryAt: new Date(
-        Date.now() + (preparationTime + travelTimeMinutes) * 60 * 1000
-      ),
-    };
-  },
+      deliveryTime,
+      totalEstimatedTime,
+    });
+
+    return totalEstimatedTime;
+  } catch (error) {
+    console.error("Error in calculateEstimatedTime:", error);
+    throw error;
+  }
+};
+
+// Helper function to calculate distance between two points using Haversine formula
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Earth's radius in km
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function toRad(degrees) {
+  return degrees * (Math.PI / 180);
+}
+
+module.exports = {
+  calculateEstimatedTime,
 };

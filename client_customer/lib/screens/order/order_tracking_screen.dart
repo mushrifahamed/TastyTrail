@@ -75,7 +75,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
       case 'confirmed':
         return Colors.green;
       case 'preparing':
-        return Colors.yellow;
+        return Colors.deepPurple;
       case 'ready_for_pickup':
         return Colors.purple;
       case 'out_for_delivery':

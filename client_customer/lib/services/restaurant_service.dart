@@ -43,22 +43,39 @@ class RestaurantService {
   }
 
   Future<Restaurant> getRestaurantById(String id) async {
-    final token = await _authService.getToken();
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('Authentication token not found');
+      }
 
-    final response = await http.get(
-      Uri.parse('$_baseUrl/$id'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-    );
+      final response = await http.get(
+        Uri.parse('$_baseUrl/$id'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
 
-    if (response.statusCode == 200) {
-      print('Restaurant API response received');
-      print('Response body: ${response.body}');
-      return Restaurant.fromJson(json.decode(response.body));
-    } else {
-      throw Exception('Failed to load restaurant: ${response.body}');
+      if (response.statusCode == 200) {
+        print('Restaurant API response received');
+        print('Response body: ${response.body}');
+
+        final Map<String, dynamic> responseData = json.decode(response.body);
+
+        // Check if the restaurant data exists in the response
+        if (responseData.containsKey('restaurant')) {
+          // Extract the restaurant object and pass it to fromJson
+          return Restaurant.fromJson(responseData['restaurant']);
+        } else {
+          throw Exception('Invalid response format: missing restaurant data');
+        }
+      } else {
+        throw Exception('Failed to load restaurant: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching restaurant: $e');
+      throw Exception('Failed to load restaurant: $e');
     }
   }
 

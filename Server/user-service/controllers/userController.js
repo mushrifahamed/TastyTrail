@@ -394,8 +394,15 @@ const registerCustomer = async (req, res, next) => {
 // Function to register a new Delivery Person
 const registerDeliveryPerson = async (req, res, next) => {
   try {
-    const { name, phone, nicOrLicense, vehicleType, vehicleNumber, documents } =
-      req.body;
+    const {
+      name,
+      password,
+      phone,
+      nicOrLicense,
+      vehicleType,
+      vehicleNumber,
+      documents,
+    } = req.body;
 
     // Check if the phone number is already in use
     const existingUser = await User.findOne({ phone });
@@ -406,6 +413,7 @@ const registerDeliveryPerson = async (req, res, next) => {
     // Create the new delivery person in the User model
     const deliveryPerson = await User.create({
       name,
+      password: await passwordUtils.hashPassword(password),
       phone,
       role: "delivery_personnel",
       nicOrLicense,
@@ -428,6 +436,7 @@ const registerDeliveryPerson = async (req, res, next) => {
       data: {
         user: {
           _id: deliveryPerson._id,
+          password: deliveryPerson.password,
           name: deliveryPerson.name,
           phone: deliveryPerson.phone,
           status: deliveryPerson.status,
