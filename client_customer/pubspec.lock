@@ -159,13 +159,13 @@ packages:
     source: sdk
     version: "0.0.0"
   flutter_compass:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: flutter_compass
-      sha256: "1a0121bff32df95193812b4e0f69e95f45fdec042ebd7a326ba087c0f6ec8304"
+      sha256: "1b4d7e6c95a675ec8482b5c9c9ccf1ebf0ced3dbec59dce28ad609da953de850"
       url: "https://pub.dev"
     source: hosted
-    version: "0.7.0"
+    version: "0.8.1"
   flutter_dotenv:
     dependency: "direct main"
     description:
@@ -190,14 +190,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.0.0"
-  flutter_map_location_marker:
-    dependency: transitive
-    description:
-      name: flutter_map_location_marker
-      sha256: "6c67f002bd5bfa61eed1f9e1a87ad3912ca734318b4fa9191d604725ae6c1c41"
-      url: "https://pub.dev"
-    source: hosted
-    version: "7.0.4"
   flutter_plugin_android_lifecycle:
     dependency: transitive
     description:
@@ -444,10 +436,10 @@ packages:
     dependency: "direct main"
     description:
       name: location_picker_flutter_map
-      sha256: "0f60268b0619a2046504225b8cadec33a77b3d38fc89d4751d72622203c7befa"
+      sha256: d7aad72261fb3fce4f51330391fffbfbaa45073fc40e322f0fcb537f27335378
       url: "https://pub.dev"
     source: hosted
-    version: "1.2.2"
+    version: "1.1.0"
   matcher:
     dependency: transitive
     description:

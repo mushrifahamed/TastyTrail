@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: delivery-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: delivery-service
+  template:
+    metadata:
+      labels:
+        app: delivery-service
+    spec:
+      containers:
+      - name: delivery-service
+        image: tastytrail/delivery-service:latest
+        ports:
+        - containerPort: 3008
+        env:
+        - name: PORT
+          value: "3008"
+        - name: MONGODB_URI
+          value: "mongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/delivery_service"
+        - name: RABBITMQ_URL
+          value: "amqp://rabbitmq"
+        - name: RABBITMQ_HOST
+          value: "rabbitmq"

@@ -482,6 +482,60 @@ const publishDeliveryPersonEvent = (deliveryPerson) => {
   });
 };
 
+// ==================== DELIVERY PERSONNEL LOGIN ====================
+const loginDeliveryPerson = async (req, res, next) => {
+  try {
+    const { phone, password } = req.body;
+
+    if (!phone || !password) {
+      return res.status(400).json({ message: "Phone and password are required" });
+    }
+
+    // Find user by phone
+    const user = await User.findOne({ phone }).select("+password");
+
+    if (!user) {
+      return res.status(404).json({ message: "Delivery personnel not found" });
+    }
+
+    // Check role
+    if (user.role !== "delivery_personnel") {
+      return res.status(403).json({ message: "Access denied. Only delivery personnel can login." });
+    }
+
+    // Validate password
+    const isPasswordValid = await passwordUtils.comparePassword(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: "Invalid phone or password" });
+    }
+
+    // Check if active
+    // if (!user.isActive) {
+    //   return res.status(403).json({ message: "Account not active. Please wait for admin approval." });
+    // }
+
+    // Generate JWT
+    const token = authService.generateToken(user._id, user.role);
+
+    res.status(200).json({
+      status: "success",
+      token,
+      data: {
+        user: {
+          _id: user._id,
+          name: user.name,
+          phone: user.phone,
+          role: user.role,
+          status: user.status,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
 module.exports = {
   registerDeliveryPerson,
   // other methods...
@@ -709,7 +763,7 @@ module.exports = {
   createRestaurantAdmin,
   getAdminsByRestaurant,
   removeRestaurantAdmin,
-
+  loginDeliveryPerson,
   // Customer methods
   registerCustomer,
 

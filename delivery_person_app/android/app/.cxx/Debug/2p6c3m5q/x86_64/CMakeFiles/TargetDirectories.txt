@@ -1,0 +1,2 @@
+/Users/beteam/Desktop/TastyTrail/TastyTrail/delivery_person_app/android/app/.cxx/Debug/2p6c3m5q/x86_64/CMakeFiles/edit_cache.dir
+/Users/beteam/Desktop/TastyTrail/TastyTrail/delivery_person_app/android/app/.cxx/Debug/2p6c3m5q/x86_64/CMakeFiles/rebuild_cache.dir

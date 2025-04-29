@@ -10,8 +10,14 @@ const {
   getDeliveryPersonOrders,
   getDeliveryOrder,
   updateOrderPaymentStatus,
+  getAllOrders,
 } = require("../controllers/orderController");
 const authMiddleware = require("../utils/authMiddleware");
+
+const { quickCreateOrder } = require('../controllers/quickOrderController');
+
+// POST /api/quick-order
+router.post('/quick-order', quickCreateOrder);
 
 // Customer routes
 router.post("/", authMiddleware(["customer"]), createOrder);
@@ -74,5 +80,7 @@ router.post(
   authMiddleware(["internal_service"]),
   updateOrderPaymentStatus
 );
+
+router.get("/", authMiddleware(["restaurant_admin", "admin"]), getAllOrders); // You can modify roles as needed
 
 module.exports = router;

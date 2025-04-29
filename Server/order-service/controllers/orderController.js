@@ -1,6 +1,7 @@
 const Order = require("../models/Order");
 const Cart = require("../models/Cart");
 const axios = require("axios");
+const mongoose = require('mongoose');
 const orderSplitter = require("../services/orderSplitter");
 const restaurantService = require("../services/restaurantService");
 const paymentService = require("../services/paymentService");
@@ -9,11 +10,14 @@ const estimationService = require("../services/estimationService");
 const userService = require("../services/userService");
 const { RESTAURANT_SERVICE_URL } = process.env;
 const amqp = require("amqplib/callback_api");
+require('dotenv').config();
 
 // Function to publish an event to RabbitMQ
-// Function to publish the order created event to RabbitMQ
+const rabbitmqHost = process.env.RABBITMQ_HOST || 'localhost'; // Smart
+const rabbitmqURL = `amqp://${rabbitmqHost}`;
+
 const publishOrderCreatedEvent = (orderId) => {
-  amqp.connect("amqp://localhost", (error, connection) => {
+  amqp.connect(rabbitmqURL, (error, connection) => {
     if (error) {
       throw error;
     }
@@ -37,6 +41,7 @@ const publishOrderCreatedEvent = (orderId) => {
     }, 500);
   });
 };
+
 
 // Create a new order with items from a single restaurant
 const createOrder = async (req, res, next) => {
@@ -189,20 +194,65 @@ const getCustomerOrders = async (req, res, next) => {
   }
 };
 
-// Get orders by restaurant
 const getRestaurantOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find({
-      restaurantId: req.params.restaurantId,
-    })
-      .sort({ createdAt: -1 })
-      .populate("customerId", "name");
+    const { restaurantId } = req.params;
+    console.log('Fetching orders for restaurantId:', restaurantId);
 
-    res.json(orders);
+    // Validate restaurantId
+    if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+      return res.status(400).json({ message: 'Invalid restaurant ID' });
+    }
+
+    // Fetch orders without population
+    const orders = await Order.find({ restaurantId })
+      .sort({ createdAt: -1 });
+
+    console.log('Orders found:', orders.length);
+
+    // Fetch user details from User Service for each order
+    const ordersWithUserDetails = await Promise.all(
+      orders.map(async (order) => {
+        let customerInfo = { name: 'N/A', phone: 'N/A' };
+        if (order.customerId && mongoose.Types.ObjectId.isValid(order.customerId)) {
+          try {
+            const userResponse = await axios.get(
+              `${process.env.USER_SERVICE_URL}/api/users/${order.customerId}`,
+              {
+                headers: {
+                  Authorization: req.headers.authorization, // Pass the same auth token
+                },
+              }
+            );
+            if (userResponse.data.status === 'success') {
+              customerInfo = {
+                name: userResponse.data.data.user.name || 'N/A',
+                phone: userResponse.data.data.user.phone || 'N/A',
+              };
+            }
+          } catch (error) {
+            console.error(`Error fetching user ${order.customerId}:`, error.message);
+            // Fallback to default values if user fetch fails
+          }
+        }
+        // Return order with customerInfo
+        return {
+          ...order.toObject(), // Convert Mongoose document to plain object
+          customerInfo,
+        };
+      })
+    );
+
+    res.json({ data: { orders: ordersWithUserDetails } });
   } catch (error) {
+    console.error('Error fetching orders:', {
+      restaurantId: req.params.restaurantId,
+      error: error.message,
+      stack: error.stack,
+    });
     next(error);
   }
-};
+}
 
 // Update order tracking status
 const updateOrderStatus = async (req, res, next) => {
@@ -410,6 +460,58 @@ const updateSubOrderStatus = async (req, res, next) => {
   }
 };
 
+
+
+// In orderController.js - getAllOrders
+const getAllOrders = async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 });
+
+    const ordersWithRestaurants = await Promise.all(
+      orders.map(async (order) => {
+        try {
+          const response = await axios.get(
+            `${process.env.RESTAURANT_SERVICE_URL}/api/restaurants/${order.restaurantId}`,
+            { headers: { Authorization: req.headers.authorization } }
+          );
+
+          // Properly handle the restaurant service response structure
+          const restaurantData = response.data.data?.restaurant || {
+            _id: order.restaurantId,
+            name: 'Restaurant Not Found'
+          };
+
+          return {
+            ...order.toObject(),
+            restaurant: {
+              _id: restaurantData._id,
+              name: restaurantData.name || `Restaurant ${restaurantData._id}`
+            }
+          };
+        } catch (error) {
+          console.error(`Error fetching restaurant ${order.restaurantId}:`, error.response?.data || error.message);
+          return {
+            ...order.toObject(),
+            restaurant: {
+              _id: order.restaurantId,
+              name: 'Service Unavailable'
+            }
+          };
+        }
+      })
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: { orders: ordersWithRestaurants }
+    });
+  } catch (err) {
+    console.error('Error fetching orders:', err);
+    res.status(500).json({ message: 'Error fetching orders' });
+  }
+};
+
+
 // Export all controller functions
 module.exports = {
   createOrder,
@@ -421,4 +523,5 @@ module.exports = {
   getDeliveryOrder,
   updateOrderPaymentStatus,
   updateSubOrderStatus,
+  getAllOrders,
 };
