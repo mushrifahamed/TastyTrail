@@ -513,21 +513,12 @@ const notificationService = require("../services/notificationService");
 const estimationService = require("../services/estimationService");
 const userService = require("../services/userService");
 const { RESTAURANT_SERVICE_URL } = process.env;
-<<<<<<< HEAD
-const amqp = require('amqplib/callback_api');
-
-=======
 const amqp = require("amqplib/callback_api");
->>>>>>> main
 
 // Function to publish an event to RabbitMQ
 // Function to publish the order created event to RabbitMQ
 const publishOrderCreatedEvent = (orderId) => {
-<<<<<<< HEAD
-  amqp.connect('amqp://localhost', (error, connection) => {
-=======
   amqp.connect("amqp://localhost", (error, connection) => {
->>>>>>> main
     if (error) {
       throw error;
     }
@@ -537,13 +528,8 @@ const publishOrderCreatedEvent = (orderId) => {
         throw error;
       }
 
-<<<<<<< HEAD
-      const queue = 'order_created_queue';  // Queue name where delivery service listens
-      const msg = JSON.stringify({ orderId });  // Message payload (only orderId)
-=======
       const queue = "order_created_queue"; // Queue name where delivery service listens
       const msg = JSON.stringify({ orderId }); // Message payload (only orderId)
->>>>>>> main
 
       channel.assertQueue(queue, { durable: true });
       channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
@@ -683,11 +669,7 @@ const createOrder = async (req, res, next) => {
 // Get order details
 const getOrderWithSubOrders = async (req, res, next) => {
   try {
-    const order = await Order.findById(req.params.id)
-      .populate("customerId", "name email")
-      .populate("items.restaurantId", "name address")
-      .populate("restaurantId", "name address")
-      .populate("deliveryPersonId", "name phone");
+    const order = await Order.findById(req.params.id);
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
@@ -931,43 +913,50 @@ const updateSubOrderStatus = async (req, res, next) => {
   }
 };
 
-<<<<<<< HEAD
 
 
-// controller/orderController.js
-// In your OrderController.js file
+// In orderController.js - getAllOrders
 const getAllOrders = async (req, res) => {
   try {
-    const orders = await Order.find(); // Fetch orders from the order service
+    const orders = await Order.find().sort({ createdAt: -1 });
 
-    // Fetch restaurant details for each order
-    const ordersWithRestaurantData = await Promise.all(orders.map(async (order) => {
-      const restaurantId = order.restaurantId; // restaurantId is just an ID in the Order model
+    const ordersWithRestaurants = await Promise.all(
+      orders.map(async (order) => {
+        try {
+          const response = await axios.get(
+            `${process.env.RESTAURANT_SERVICE_URL}/api/restaurants/${order.restaurantId}`,
+            { headers: { Authorization: req.headers.authorization } }
+          );
 
-      // Fetch restaurant data using the restaurantId (make API request to the restaurant service)
-      try {
-        const restaurantResponse = await axios.get(`http://localhost:3001/api/restaurants/${restaurantId}`);
-        const restaurantData = restaurantResponse.data;
+          // Properly handle the restaurant service response structure
+          const restaurantData = response.data.data?.restaurant || {
+            _id: order.restaurantId,
+            name: 'Restaurant Not Found'
+          };
 
-        // Attach restaurant data to the order
-        return {
-          ...order.toObject(),
-          restaurant: restaurantData, // Attach the full restaurant details
-        };
-      } catch (restaurantError) {
-        console.error(`Error fetching restaurant data for order ${order._id}: `, restaurantError);
-        return {
-          ...order.toObject(),
-          restaurant: null, // In case of error, you can attach null or default data
-        };
-      }
-    }));
+          return {
+            ...order.toObject(),
+            restaurant: {
+              _id: restaurantData._id,
+              name: restaurantData.name || `Restaurant ${restaurantData._id}`
+            }
+          };
+        } catch (error) {
+          console.error(`Error fetching restaurant ${order.restaurantId}:`, error.response?.data || error.message);
+          return {
+            ...order.toObject(),
+            restaurant: {
+              _id: order.restaurantId,
+              name: 'Service Unavailable'
+            }
+          };
+        }
+      })
+    );
 
     res.status(200).json({
       status: 'success',
-      data: {
-        orders: ordersWithRestaurantData, // return orders with restaurant details
-      },
+      data: { orders: ordersWithRestaurants }
     });
   } catch (err) {
     console.error('Error fetching orders:', err);
@@ -976,8 +965,6 @@ const getAllOrders = async (req, res) => {
 };
 
 
-=======
->>>>>>> main
 // Export all controller functions
 module.exports = {
   createOrder,
@@ -989,10 +976,7 @@ module.exports = {
   getDeliveryOrder,
   updateOrderPaymentStatus,
   updateSubOrderStatus,
-<<<<<<< HEAD
   getAllOrders,
-=======
->>>>>>> main
 };
 
 

@@ -10,6 +10,7 @@ import RestaurantManagement from "./pages/admin/RestaurantManagement";
 import OrderManagement from "./pages/admin/OrderManagement";
 import RestaurantAdminDashboard from "./pages/restaurant-admin/Dashboard";
 import RestaurantAdminProfile from "./pages/restaurant-admin/Profile";
+import RestaurantAdminOrders from "./pages/restaurant-admin/Orders";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -57,6 +58,7 @@ function App() {
             <Route element={<Layout role="restaurant_admin" />}>
               <Route index element={<RestaurantAdminDashboard />} />
               <Route path="profile" element={<RestaurantAdminProfile />} />
+              <Route path="orders" element={<RestaurantAdminOrders />} />
             </Route>
           </Route>
 
