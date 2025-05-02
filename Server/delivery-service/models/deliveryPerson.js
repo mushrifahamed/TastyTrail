@@ -1,24 +1,29 @@
 const mongoose = require('mongoose');
 
 const deliveryPersonSchema = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: 'User'
+  },
   name: { type: String, required: true },
   phone: { type: String, required: true },
-  role: { type: String, default: 'delivery_personnel' }, // default to delivery personnel
+  role: { type: String, default: 'delivery_personnel' },
   isActive: { type: Boolean, default: false },
   status: { type: String, default: 'pending' },
   nicOrLicense: { type: String, required: true },
   vehicleInfo: {
     type: {
-      type: String, // vehicleInfo.type
+      type: String,
       required: true
     },
     number: {
-      type: String, // vehicleInfo.number
+      type: String,
       required: true
     }
   },
   documents: {
-    type: [String], // array of URLs
+    type: [String],
     default: []
   },
   emailVerified: { type: Boolean, default: false },

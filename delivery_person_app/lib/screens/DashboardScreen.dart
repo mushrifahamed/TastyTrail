@@ -7,6 +7,7 @@ import 'package:delivery_person_app/screens/tabs/earnings_tab.dart';
 import 'package:delivery_person_app/screens/tabs/profile_tab.dart';
 import 'package:delivery_person_app/services/DeliveryNotificationService.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 
 class DashBoard extends StatefulWidget {
@@ -19,12 +20,21 @@ class DashBoard extends StatefulWidget {
 class _DashBoardState extends State<DashBoard> {
   int _selectedIndex = 0;
   bool _isOnline = false;
+   String? _driverId = "68106003af1069246854ef05";
 
   @override
 void initState() {
   super.initState();
+  _loadDriverId();
   DeliveryNotificationService().initialize(context);
 }
+Future<void> _loadDriverId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final id = prefs.getString('user_id');
+    setState(() {
+      _driverId = id;
+    });
+  }
 
 
   @override
@@ -46,9 +56,7 @@ void initState() {
         earningsData: DummyData.getEarningsData(),
       );
     case 1:
-      return DeliveryHistoryTab(
-        completedDeliveries: DummyData.getDeliveryHistory(),
-      );
+      return DeliveryHistoryTab();
     case 2:
       return EarningsTab(
         earningsData: DummyData.getEarningsData(),

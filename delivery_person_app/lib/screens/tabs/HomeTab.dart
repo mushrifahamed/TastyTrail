@@ -28,9 +28,9 @@ final Map<String, dynamic> earningsData;
           _buildActiveDeliveries(),
 
           const SizedBox(height: 24),
-          _buildSectionHeader('Recent Completed Orders', 'See All'),
+         // _buildSectionHeader('Recent Completed Orders', 'See All'),
           const SizedBox(height: 12),
-          _buildCompletedDeliveries(),
+         // _buildCompletedDeliveries(),
         ],
       ),
     );

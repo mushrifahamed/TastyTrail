@@ -35,29 +35,32 @@ const listenForDeliveryPersonRegistration = () => {
 const saveDeliveryPerson = async (data) => {
   try {
     const newDeliveryPerson = new DeliveryPerson({
+      userId: data.deliveryPersonId, // <- Save User _id here
       name: data.name,
       phone: data.phone,
       role: data.role || 'delivery_personnel',
       isActive: data.isActive ?? false,
       status: data.status || 'pending',
-      nicOrLicense: data.nicOrLicense || '',
+      nicOrLicense: data.nicOrLicense || 'UNKNOWN',
       vehicleInfo: {
-        type: data.vehicleInfo?.type || '',
-        number: data.vehicleInfo?.number || '',
+        type: data.vehicleType || '',
+        number: data.vehicleLicensePlate || '',
       },
       documents: data.documents || [],
       emailVerified: data.emailVerified ?? false,
       phoneVerified: data.phoneVerified ?? false,
-      createdAt: data.createdAt ? new Date(data.createdAt.$date.$numberLong * 1) : new Date(),
-      updatedAt: data.updatedAt ? new Date(data.updatedAt.$date.$numberLong * 1) : new Date(),
+      createdAt: data.createdAt ? new Date(data.createdAt) : new Date(),
+      updatedAt: data.updatedAt ? new Date(data.updatedAt) : new Date(),
     });
 
     await newDeliveryPerson.save();
-    console.log(`Saved delivery person: ${newDeliveryPerson.name}`);
+    console.log(`✅ Saved delivery person: ${newDeliveryPerson.name}`);
   } catch (error) {
-    console.error('Error saving delivery person:', error.message);
+    console.error('❌ Error saving delivery person:', error.message);
   }
 };
+
+
 
 listenForDeliveryPersonRegistration();
 
