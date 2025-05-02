@@ -1,26 +1,69 @@
+
+import 'package:delivery_person_app/models/delivery.dart';
+import 'package:delivery_person_app/services/order_service.dart';
 import 'package:flutter/material.dart';
-import 'package:delivery_person_app/models/deliveryModel.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-class DeliveryHistoryTab extends StatelessWidget {
-  final List<Delivery> completedDeliveries;
 
-  const DeliveryHistoryTab({
-    Key? key,
-    required this.completedDeliveries,
-  }) : super(key: key);
+class DeliveryHistoryTab extends StatefulWidget {
+  // final String driverId;
+  //const DeliveryHistoryTab({Key? key, required this.driverId}) : super(key: key);
+
+  @override
+  State<DeliveryHistoryTab> createState() => _DeliveryHistoryTabState();
+}
+
+class _DeliveryHistoryTabState extends State<DeliveryHistoryTab> {
+  Future<List<DeliveryData>>? _deliveredOrdersFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDriverIdAndFetchOrders();
+  }
+
+  Future<void> _loadDriverIdAndFetchOrders() async {
+    final prefs = await SharedPreferences.getInstance();
+  final driverId = prefs.getString('user_id');
+
+    if (driverId != null) {
+      setState(() {
+        _deliveredOrdersFuture = DeliveryService.fetchDeliveredOrders(driverId);
+      });
+    } else {
+      // Handle case when driverId is not found
+      setState(() {
+        _deliveredOrdersFuture = Future.error('Driver ID not found in storage');
+      });
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSearchAndFilter(),
-          const SizedBox(height: 16),
-          _buildDeliveryList(),
-        ],
-      ),
+    return FutureBuilder<List<DeliveryData>>(
+      future: _deliveredOrdersFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        } else if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return _buildEmptyState('No Delivery History', 'Your completed orders will appear here.', Icons.history_outlined);
+        }
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildSearchAndFilter(),
+              const SizedBox(height: 16),
+              _buildDeliveryList(snapshot.data!),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -56,17 +99,13 @@ class DeliveryHistoryTab extends StatelessWidget {
     );
   }
 
-  Widget _buildDeliveryList() {
-    if (completedDeliveries.isEmpty) {
-      return _buildEmptyState('No Delivery History', 'Your completed orders will appear here.', Icons.history_outlined);
-    }
-
+  Widget _buildDeliveryList(List<DeliveryData> completedDeliveries) {
     return Column(
       children: completedDeliveries.map((delivery) => _buildDeliveryCard(delivery)).toList(),
     );
   }
 
-  Widget _buildDeliveryCard(Delivery delivery) {
+  Widget _buildDeliveryCard(DeliveryData delivery) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -85,7 +124,7 @@ class DeliveryHistoryTab extends StatelessWidget {
               children: [
                 Text(delivery.orderId ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
-                Text(delivery.restaurant ?? ''),
+                Text(delivery.restaurant ?? 'Restaurant'),
                 const SizedBox(height: 4),
                 Text(delivery.customerName ?? '', style: TextStyle(color: Colors.grey.shade600)),
                 const SizedBox(height: 4),

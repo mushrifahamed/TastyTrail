@@ -30,12 +30,14 @@ exports.registerToken = async (req, res) => {
 // Send to a specific user
 exports.sendToUser = async (req, res) => {
   const { userId, role, title, body, data } = req.body;
+  console.log("📨 Spesific user received:", req.body);
 
   const user = await Token.findOne({ userId, role });
   if (!user) return res.status(404).json({ message: "Token not found" });
 
   try {
     await sendNotification(user.token, title, body, data);
+    console.log("📨 Notification sent to user:", user.userId,"fcm--",user.token);
     res.json({ message: "Notification sent" });
   } catch (err) {
     res.status(500).json({ message: "Failed to send", error: err.message });
@@ -54,6 +56,7 @@ exports.broadcast = async (req, res) => {
     try {
       const res = await sendNotification(user.token, title, body, data);
       results.push({ userId: user.userId, result: res });
+      console.log("📨 Notification sent to user:", user.userId,"fcm--",user.token);
     } catch (err) {
       results.push({ userId: user.userId, error: err.message });
     }

@@ -158,7 +158,7 @@ const createOrder = async (req, res, next) => {
     }
 
     // Publish the order created event to RabbitMQ after the order is created
-    publishOrderCreatedEvent(savedOrder._id);
+    //publishOrderCreatedEvent(savedOrder._id);
 
     res.status(201).json(savedOrder);
   } catch (error) {
@@ -284,6 +284,10 @@ const updateOrderStatus = async (req, res, next) => {
     }
 
     await order.save();
+    // Publish to delivery service when status is "ready"
+if (status === "ready_for_pickup") {
+  publishOrderReadyEvent(order);
+}
 
     // Notify customer about status update
     await notificationService.sendNotification(
@@ -298,6 +302,44 @@ const updateOrderStatus = async (req, res, next) => {
     next(error);
   }
 };
+
+const publishOrderReadyEvent = (order) => {
+  amqp.connect(rabbitmqURL, (error, connection) => {
+    if (error) {
+      throw error;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        throw error;
+      }
+
+      const queue = "order_ready_queue"; // You can use the same or a separate queue
+      const message = {
+        orderId: order._id,
+        customerId: order.customerId,
+        customerInfo: order.customerInfo,
+        items: order.items,
+        deliveryAddress: order.deliveryAddress,
+        deliveryLocation: order.deliveryLocation,
+        restaurantId: order.restaurantId,
+        totalAmount: order.totalAmount,
+        estimatedDeliveryTime: order.estimatedDeliveryTime,
+      };
+
+      const msg = JSON.stringify(message);
+      channel.assertQueue(queue, { durable: true });
+      channel.sendToQueue(queue, Buffer.from(msg), { persistent: true });
+
+      console.log(`Order Ready Event Sent: ${msg}`);
+    });
+
+    setTimeout(() => {
+      connection.close();
+    }, 500);
+  });
+};
+
 
 // Get orders assigned to delivery person
 const getDeliveryPersonOrders = async (req, res, next) => {

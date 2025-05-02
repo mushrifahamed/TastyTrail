@@ -202,30 +202,51 @@ class _SignupScreenState extends State<SignupScreen> {
                       
                       // Phone Number
                       TextFormField(
-                        controller: _phoneController,
-                        keyboardType: TextInputType.phone,
-                        decoration: const InputDecoration(
-                          labelText: 'Phone Number',
-                          prefixIcon: Icon(Icons.phone_outlined),
-                          hintText: 'Enter your phone number (e.g., +94779422535)',
-                          filled: true,
-                          fillColor: Color(0xFFF5F5F5),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.all(Radius.circular(12)),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter your phone number';
-                          }
-                          // Basic phone number validation
-                          if (!value.startsWith('+')) {
-                            return 'Phone number should start with country code (e.g., +94)';
-                          }
-                          return null;
-                        },
-                      ),
+  controller: _phoneController,
+  keyboardType: TextInputType.phone,
+  decoration: const InputDecoration(
+    labelText: 'Phone Number',
+    prefixIcon: Icon(Icons.phone_outlined),
+    filled: true,
+    fillColor: Color(0xFFF5F5F5),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(12)),
+      borderSide: BorderSide.none,
+    ),
+  ),
+  inputFormatters: [
+    // Custom input formatter to control typing
+    FilteringTextInputFormatter.allow(RegExp(r'^\+94[1-9][0-9]*$')),
+  ],
+  onChanged: (value) {
+    if (!value.startsWith('+94')) {
+      _phoneController.text = '+94';
+      _phoneController.selection = TextSelection.fromPosition(
+        const TextPosition(offset: 3),
+      );
+    }
+  },
+  validator: (value) {
+    if (value == null || value.isEmpty || value.length < 6) {
+      return 'Please enter a valid phone number';
+    }
+    if (!value.startsWith('+94')) {
+      return 'Phone number must start with +94';
+    }
+    if (value.length >= 4 && value[3] == '0') {
+      return 'Do not start with 0 after +94';
+    }
+    return null;
+  },
+  onTap: () {
+    // Ensure +94 is always there on focus
+    if (!_phoneController.text.startsWith('+94')) {
+      _phoneController.text = '+94';
+      _phoneController.selection = const TextSelection.collapsed(offset: 3);
+    }
+  },
+),
+
                       const SizedBox(height: 24),
                       
                       // Password
