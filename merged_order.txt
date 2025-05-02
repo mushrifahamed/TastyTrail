@@ -248,6 +248,8 @@ const checkoutCart = async (req, res, next) => {
     const { deliveryAddress, deliveryLocation } = req.body;
     const token = req.headers.authorization?.split(" ")[1];
 
+    console.log("checkoutCart", req.body);
+
     const cart = await Cart.findOne({ customerId });
     if (!cart || cart.items.length === 0) {
       return res.status(400).json({ message: "Cart is empty" });
@@ -281,6 +283,8 @@ const checkoutCart = async (req, res, next) => {
 
         // Calculate total amount for this restaurant's items
         const totalAmount = orderSplitter.calculateOrderTotal(restaurantItems);
+
+        console.log("rest items", restaurantItems);
 
         // Calculate estimated delivery time
         const estimatedTime = await estimationService.calculateEstimatedTime(
@@ -360,8 +364,19 @@ const checkoutCart = async (req, res, next) => {
 const checkoutRestaurant = async (req, res, next) => {
   try {
     const customerId = req.user.id;
-    const { restaurantId, deliveryAddress } = req.body;
+    const { restaurantId, deliveryAddress, paymentMethod } = req.body;
     const token = req.headers.authorization?.split(" ")[1];
+
+    if (!req.body.deliveryLocation || !req.body.deliveryLocation.coordinates) {
+      return res.status(400).json({
+        message: "Delivery location coordinates are required",
+      });
+    }
+
+    if (!deliveryAddress) {
+      console.log("Delivery address is required");
+      return res.status(400).json({ message: "Delivery address is required" });
+    }
 
     // Use default delivery location if not provided
     const deliveryLocation = req.body.deliveryLocation || { lat: 0, lng: 0 };
@@ -397,12 +412,18 @@ const checkoutRestaurant = async (req, res, next) => {
     // Calculate total amount for this restaurant's items
     const totalAmount = orderSplitter.calculateOrderTotal(restaurantItems);
 
+    console.log("rest items", restaurantItems);
+
+    console.log("Delivery location:", deliveryLocation);
+
     // Calculate estimated delivery time
     const estimatedTime = await estimationService.calculateEstimatedTime(
       restaurantItems,
       deliveryLocation,
-      [restaurantId]
+      restaurantId
     );
+
+    console.log("estimated time", estimatedTime);
 
     // Create order for this restaurant
     const order = new Order({
@@ -416,6 +437,7 @@ const checkoutRestaurant = async (req, res, next) => {
       deliveryLocation,
       totalAmount,
       paymentStatus: "pending",
+      paymentType: paymentMethod,
       estimatedDeliveryTime: estimatedTime,
       trackingStatus: "placed",
       statusUpdates: [
@@ -437,7 +459,8 @@ const checkoutRestaurant = async (req, res, next) => {
       totalAmount,
       customerId,
       `Order #${savedOrder._id} for restaurant ${restaurantId}`,
-      token
+      token,
+      paymentMethod
     );
 
     // Update order with payment ID
@@ -461,7 +484,7 @@ const checkoutRestaurant = async (req, res, next) => {
         checkoutUrl: paymentResponse.checkoutUrl,
         paymentParams: paymentResponse.paymentParams,
       },
-      cart: cart, // Return the updated cart with remaining items
+      cart: cart,
     });
   } catch (error) {
     next(error);
@@ -531,6 +554,10 @@ const createOrder = async (req, res, next) => {
       deliveryLocation,
     } = req.body;
 
+    if (!deliveryAddress) {
+      return res.status(400).json({ message: "Delivery address is required" });
+    }
+
     // Ensure all items are from the same restaurant
     const restaurantIds = [
       ...new Set(items.map((item) => item.restaurantId.toString())),
@@ -557,11 +584,13 @@ const createOrder = async (req, res, next) => {
     // Calculate total amount
     const totalAmount = orderSplitter.calculateOrderTotal(items);
 
+    console.log("Delivery location:", deliveryLocation);
+
     // Calculate estimated delivery time
     const estimatedTime = await estimationService.calculateEstimatedTime(
       items,
       deliveryLocation,
-      [restaurantId]
+      restaurantId
     );
 
     // Create the order
@@ -640,11 +669,7 @@ const createOrder = async (req, res, next) => {
 // Get order details
 const getOrderWithSubOrders = async (req, res, next) => {
   try {
-    const order = await Order.findById(req.params.id)
-      .populate("customerId", "name email")
-      .populate("items.restaurantId", "name address")
-      .populate("restaurantId", "name address")
-      .populate("deliveryPersonId", "name phone");
+    const order = await Order.findById(req.params.id);
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
@@ -659,9 +684,9 @@ const getOrderWithSubOrders = async (req, res, next) => {
 // Get orders by customer
 const getCustomerOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find({ customerId: req.params.customerId })
-      .sort({ createdAt: -1 })
-      .populate("restaurantId", "name");
+    const orders = await Order.find({ customerId: req.params.customerId }).sort(
+      { createdAt: -1 }
+    );
 
     res.json(orders);
   } catch (error) {
@@ -888,6 +913,58 @@ const updateSubOrderStatus = async (req, res, next) => {
   }
 };
 
+
+
+// In orderController.js - getAllOrders
+const getAllOrders = async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 });
+
+    const ordersWithRestaurants = await Promise.all(
+      orders.map(async (order) => {
+        try {
+          const response = await axios.get(
+            `${process.env.RESTAURANT_SERVICE_URL}/api/restaurants/${order.restaurantId}`,
+            { headers: { Authorization: req.headers.authorization } }
+          );
+
+          // Properly handle the restaurant service response structure
+          const restaurantData = response.data.data?.restaurant || {
+            _id: order.restaurantId,
+            name: 'Restaurant Not Found'
+          };
+
+          return {
+            ...order.toObject(),
+            restaurant: {
+              _id: restaurantData._id,
+              name: restaurantData.name || `Restaurant ${restaurantData._id}`
+            }
+          };
+        } catch (error) {
+          console.error(`Error fetching restaurant ${order.restaurantId}:`, error.response?.data || error.message);
+          return {
+            ...order.toObject(),
+            restaurant: {
+              _id: order.restaurantId,
+              name: 'Service Unavailable'
+            }
+          };
+        }
+      })
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: { orders: ordersWithRestaurants }
+    });
+  } catch (err) {
+    console.error('Error fetching orders:', err);
+    res.status(500).json({ message: 'Error fetching orders' });
+  }
+};
+
+
 // Export all controller functions
 module.exports = {
   createOrder,
@@ -899,6 +976,7 @@ module.exports = {
   getDeliveryOrder,
   updateOrderPaymentStatus,
   updateSubOrderStatus,
+  getAllOrders,
 };
 
 
@@ -1136,6 +1214,7 @@ const {
   getDeliveryPersonOrders,
   getDeliveryOrder,
   updateOrderPaymentStatus,
+  getAllOrders,
 } = require("../controllers/orderController");
 const authMiddleware = require("../utils/authMiddleware");
 
@@ -1148,7 +1227,12 @@ router.get(
 );
 router.get(
   "/:id",
-  authMiddleware(["customer", "restaurant_admin", "delivery_personnel"]),
+  authMiddleware([
+    "customer",
+    "restaurant_admin",
+    "delivery_personnel",
+    "internal_service",
+  ]),
   getOrderWithSubOrders
 );
 
@@ -1196,6 +1280,8 @@ router.post(
   updateOrderPaymentStatus
 );
 
+router.get("/", authMiddleware(["restaurant_admin", "admin"]), getAllOrders); // You can modify roles as needed
+
 module.exports = router;
 
 
@@ -1204,49 +1290,46 @@ const axios = require("axios");
 const { RESTAURANT_SERVICE_URL } = process.env;
 
 module.exports = {
-  calculateEstimatedTime: async (items, deliveryLocation, restaurantIds) => {
+  calculateEstimatedTime: async (items, deliveryLocation, restaurantId) => {
     if (!items || !Array.isArray(items)) {
       console.log("Warning: items is undefined or not an array");
       return { estimatedTime: 30 }; // Default value
     }
+    if (!restaurantId) {
+      throw new Error("restaurantId is required for estimation");
+    }
+
+    console.log("Calculating estimated time for items:", items);
+    console.log("restaurantId:", restaurantId);
 
     // 1. Calculate preparation time (10 mins per item)
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
     const preparationTime = totalItems * 10; // in minutes
 
-    // 2. Get restaurant locations from restaurant service
-    const restaurantLocations = await Promise.all(
-      restaurantIds.map((id) =>
-        axios
-          .get(`${RESTAURANT_SERVICE_URL}/api/restaurants/${id}`)
-          .then((res) => res.data.address.geoCoordinates)
-      )
-    );
+    // 2. Get restaurant location from restaurant service
+    const restaurantLocation = await axios
+      .get(`${RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`)
+      .then((res) => res.data.address.geoCoordinates);
 
-    // 3. Calculate average distance (simple straight-line calculation)
-    const distances = restaurantLocations.map((coords) => {
-      const [restaurantLong, restaurantLat] = coords.coordinates;
-      const [deliveryLong, deliveryLat] = deliveryLocation.coordinates;
+    // 3. Calculate distance (simple straight-line calculation)
+    const [restaurantLong, restaurantLat] = restaurantLocation.coordinates;
+    const [deliveryLong, deliveryLat] = deliveryLocation.coordinates;
 
-      // Haversine formula for distance calculation
-      const R = 6371; // Earth's radius in km
-      const dLat = ((deliveryLat - restaurantLat) * Math.PI) / 180;
-      const dLon = ((deliveryLong - restaurantLong) * Math.PI) / 180;
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos((restaurantLat * Math.PI) / 180) *
-          Math.cos((deliveryLat * Math.PI) / 180) *
-          Math.sin(dLon / 2) *
-          Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c; // Distance in km
-    });
-
-    const avgDistance =
-      distances.reduce((sum, dist) => sum + dist, 0) / distances.length;
+    // Haversine formula
+    const R = 6371; // Earth's radius in km
+    const dLat = ((deliveryLat - restaurantLat) * Math.PI) / 180;
+    const dLon = ((deliveryLong - restaurantLong) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((restaurantLat * Math.PI) / 180) *
+        Math.cos((deliveryLat * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c; // Distance in km
 
     // 4. Estimate delivery time (assuming 30 km/h average speed)
-    const travelTimeMinutes = (avgDistance / 30) * 60;
+    const travelTimeMinutes = (distance / 30) * 60;
 
     // 5. Total estimated time
     return {
@@ -1323,7 +1406,8 @@ const createPayment = async (
   amount,
   customerId,
   description,
-  token
+  token,
+  paymentMethod
 ) => {
   try {
     console.log("Creating payment with token:", token); // Debug log
@@ -1334,6 +1418,7 @@ const createPayment = async (
         amount,
         customerId,
         description,
+        paymentMethod,
       },
       {
         headers: {

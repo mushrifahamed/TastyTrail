@@ -6,11 +6,14 @@ const {
   // Admin
   createAdmin,
 
+
+
   // Restaurant Admin
   //requestRestaurantAdminAccess,
   //approveRestaurantAdmin,
   createRestaurantAdmin,  // <-- Import the new controller for creating restaurant admin
   getAdminsByRestaurant,
+  removeRestaurantAdmin,
   
   // Customer
   registerCustomer,
@@ -18,7 +21,7 @@ const {
   // Delivery
   registerDeliveryPerson,
   approveDeliveryPerson,
-
+  loginDeliveryPerson,
   // Common
   login,
   getMe,
@@ -30,10 +33,13 @@ const {
 } = require("../controllers/userController");
 const authMiddleware = require("../utils/authMiddleware");
 
+const userController = require('../controllers/userController');
+
+
 // ==================== PUBLIC ROUTES ====================
 // Restaurant admin request access
 //router.post("/restaurant-admin/request", requestRestaurantAdminAccess);
-
+router.post('/login-delivery', loginDeliveryPerson);
 // Customer registration
 router.post("/customers/register", registerCustomer);
 
@@ -78,17 +84,21 @@ router.get("/:id", getUser);
 router.patch("/:id", updateUser);
 router.delete("/:id", deleteUser);
 
-// ==================== RESTAURANT ADMIN CREATION ROUTE ====================
+// ==================== RESTAURANT ADMIN ROUTEs ====================
 
-// Add these routes
+router.post('/restaurant-admin', 
+  authMiddleware(['admin']), 
+  createRestaurantAdmin
+);
+
 router.get('/restaurant/:restaurantId/admins', 
   authMiddleware(['admin']), 
   getAdminsByRestaurant
 );
 
-router.post('/restaurant-admin', 
+router.delete('/restaurant-admin/:adminId', 
   authMiddleware(['admin']), 
-  createRestaurantAdmin
+  removeRestaurantAdmin
 );
 
 module.exports = router;

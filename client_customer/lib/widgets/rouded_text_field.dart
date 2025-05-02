@@ -13,7 +13,7 @@ class RoundedTextField extends StatelessWidget {
   final String? labelText;
 
   const RoundedTextField({
-    Key? key,
+    super.key,
     required this.controller,
     this.hintText,
     this.keyboardType,
@@ -21,7 +21,7 @@ class RoundedTextField extends StatelessWidget {
     this.suffixIcon,
     this.validator,
     this.labelText,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -32,9 +32,9 @@ class RoundedTextField extends StatelessWidget {
           Text(
             labelText!,
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Colors.black,
-              fontWeight: FontWeight.w600,
-            ),
+                  color: Colors.black,
+                  fontWeight: FontWeight.w600,
+                ),
           ),
           SizedBox(height: 8.h),
         ],

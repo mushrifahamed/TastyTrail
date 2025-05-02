@@ -1,6 +1,10 @@
+import 'package:delivery_person_app/screens/DashboardScreen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:delivery_person_app/screens/login_screen.dart';
 import 'dart:async';
+
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -13,38 +17,49 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   late AnimationController _animationController;
   late Animation<double> _animation;
 
-  @override
-  void initState() {
-    super.initState();
-    
-    // Create animation controller
-    _animationController = AnimationController(
-      duration: const Duration(seconds: 2),
-      vsync: this,
-    );
-    
-    // Create a curved animation for a nice effect
-    _animation = CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeInOut,
-    );
-    
-    // Start animation
-    _animationController.forward();
-    
-    // Navigate to login screen after a delay
-    Timer(const Duration(seconds: 3), () {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-      );
-    });
-  }
+  
+ @override
+void initState() {
+  super.initState();
+
+  _animationController = AnimationController(
+    duration: const Duration(seconds: 2),
+    vsync: this,
+  );
+
+  _animation = CurvedAnimation(
+    parent: _animationController,
+    curve: Curves.easeInOut,
+  );
+
+  _animationController.forward();
+  _checkLoginStatus();
+ 
+}
+
 
   @override
   void dispose() {
     _animationController.dispose();
     super.dispose();
   }
+
+  Future<void> _checkLoginStatus() async {
+  await Future.delayed(const Duration(seconds: 2)); // for splash delay + animation
+  final prefs = await SharedPreferences.getInstance();
+  final token = prefs.getString('auth_token');
+
+  if (token != null && token.isNotEmpty) {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const DashBoard()),
+    );
+  } else {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+    );
+  }
+}
+
 
   @override
   Widget build(BuildContext context) {

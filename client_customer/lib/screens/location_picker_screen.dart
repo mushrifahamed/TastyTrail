@@ -9,8 +9,7 @@ import '../theme/app_theme.dart';
 class LocationPickerScreen extends StatefulWidget {
   final LatLng? initialLocation;
 
-  const LocationPickerScreen({Key? key, this.initialLocation})
-      : super(key: key);
+  const LocationPickerScreen({super.key, this.initialLocation});
 
   @override
   _LocationPickerScreenState createState() => _LocationPickerScreenState();

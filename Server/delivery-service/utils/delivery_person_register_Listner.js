@@ -1,9 +1,12 @@
 const amqp = require('amqplib/callback_api');
 const DeliveryPerson = require('../models/deliveryPerson');
 
+const rabbitmqHost = process.env.RABBITMQ_HOST || 'localhost';  // Smart dynamic host
+const rabbitmqURL = `amqp://${rabbitmqHost}`;
+
 // Function to listen for delivery person registration events
 const listenForDeliveryPersonRegistration = () => {
-  amqp.connect('amqp://rabbitmq', (error, connection) => {  
+  amqp.connect(rabbitmqURL, (error, connection) => {
     if (error) {
       throw error;
     }
@@ -14,7 +17,6 @@ const listenForDeliveryPersonRegistration = () => {
       }
 
       const queue = 'delivery_person_registered_queue';
-
       channel.assertQueue(queue, { durable: true });
       console.log('Waiting for delivery person registration events...');
 
@@ -30,28 +32,33 @@ const listenForDeliveryPersonRegistration = () => {
   });
 };
 
-
-// Function to save the delivery person in the DeliveryPerson model
 const saveDeliveryPerson = async (data) => {
   try {
     const newDeliveryPerson = new DeliveryPerson({
       name: data.name,
       phone: data.phone,
-      location: "",  // You can leave it empty or update later
-      availability: true, // Default availability
-      vehicleType: data.vehicleType,
-      vehicleLicensePlate: data.vehicleLicensePlate,
+      role: data.role || 'delivery_personnel',
+      isActive: data.isActive ?? false,
+      status: data.status || 'pending',
+      nicOrLicense: data.nicOrLicense || '',
+      vehicleInfo: {
+        type: data.vehicleInfo?.type || '',
+        number: data.vehicleInfo?.number || '',
+      },
+      documents: data.documents || [],
+      emailVerified: data.emailVerified ?? false,
+      phoneVerified: data.phoneVerified ?? false,
+      createdAt: data.createdAt ? new Date(data.createdAt.$date.$numberLong * 1) : new Date(),
+      updatedAt: data.updatedAt ? new Date(data.updatedAt.$date.$numberLong * 1) : new Date(),
     });
 
-    // Save the delivery person in the database
     await newDeliveryPerson.save();
     console.log(`Saved delivery person: ${newDeliveryPerson.name}`);
   } catch (error) {
-    console.error('Error saving delivery person:', error);
+    console.error('Error saving delivery person:', error.message);
   }
 };
 
-// Start listening for the delivery person registration events
 listenForDeliveryPersonRegistration();
 
 module.exports = {

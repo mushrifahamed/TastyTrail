@@ -4,8 +4,9 @@ const mongoose = require("mongoose");
 const authService = require("../services/authService");
 const { sendEmail } = require("../services/emailService");
 const passwordUtils = require("../utils/passwordUtils");
+const axios = require("axios");
 const { JWT_SECRET, JWT_EXPIRES_IN } = process.env;
-const amqp = require('amqplib/callback_api');
+const amqp = require("amqplib/callback_api");
 
 // ==================== TOKEN VERIFICATION ====================
 const verifyToken = async (req, res, next) => {
@@ -13,7 +14,6 @@ const verifyToken = async (req, res, next) => {
     // Get token from header
 
     const token = req.headers.authorization?.split(" ")[1];
-
 
     if (!token) {
       return res.status(401).json({ message: "No token provided" });
@@ -90,35 +90,65 @@ const createAdmin = async (req, res, next) => {
 // ==================== RESTAURANT ADMIN METHODS ====================
 
 // Create a new Restaurant Admin
-// In your userController.js, enhance the createRestaurantAdmin function
 const createRestaurantAdmin = async (req, res, next) => {
   try {
+    console.log("Incoming request body:", req.body); // Log the entire request
     const { name, email, phone, password, restaurantId } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !phone || !restaurantId) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Name, email, phone and restaurantId are required",
+      });
+    }
 
     // Validate restaurant exists (call restaurant service)
     try {
       const restaurantResponse = await axios.get(
-        `${process.env.RESTAURANT_SERVICE_URL}/api/restaurants/${restaurantId}`
+        `${process.env.RESTAURANT_SERVICE_URL}/api/restaurants/verify/${restaurantId}`,
+        {
+          headers: {
+            Authorization: req.headers.authorization,
+          },
+        }
       );
-      if (!restaurantResponse.data) {
-        return res.status(404).json({ message: "Restaurant not found" });
+
+      if (
+        !restaurantResponse.data ||
+        restaurantResponse.data.status !== "success"
+      ) {
+        return res.status(404).json({
+          status: "fail",
+          message: "Restaurant not found",
+        });
       }
     } catch (err) {
-      return res.status(404).json({ message: "Restaurant not found" });
+      console.error("Error verifying restaurant:", err);
+      return res.status(404).json({
+        status: "fail",
+        message: "Restaurant verification failed",
+      });
     }
 
     // Check if user already exists
     const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
     if (existingUser) {
-      return res.status(400).json({ message: "Email or phone already in use" });
+      return res.status(400).json({
+        status: "fail",
+        message: "Email or phone already in use",
+      });
     }
+
+    // Generate password if not provided
+    const adminPassword = password || passwordUtils.generateRandomPassword();
 
     // Create the restaurant admin
     const restaurantAdmin = await User.create({
       name,
       email,
       phone,
-      password: await passwordUtils.hashPassword(password),
+      password: await passwordUtils.hashPassword(adminPassword),
       role: "restaurant_admin",
       isActive: true,
       restaurantId: new mongoose.Types.ObjectId(restaurantId),
@@ -126,13 +156,18 @@ const createRestaurantAdmin = async (req, res, next) => {
       phoneVerified: true,
     });
 
+    // Remove sensitive data before sending response
+    restaurantAdmin.password = undefined;
+
     // Send welcome email
-    if (email) {
+    try {
       await sendEmail(
         email,
         "Welcome as Restaurant Admin",
-        `Hello ${name},\n\nYou have been assigned as the admin for restaurant ${restaurantId}.\n\nYour login credentials:\nEmail: ${email}\nPassword: ${password}`
+        `Hello ${name},\n\nYou have been assigned as the admin for restaurant ${restaurantId}.\n\nYour login credentials:\nEmail: ${email}\nPassword: ${adminPassword}`
       );
+    } catch (emailError) {
+      console.error("Failed to send welcome email:", emailError);
     }
 
     res.status(201).json({
@@ -146,21 +181,62 @@ const createRestaurantAdmin = async (req, res, next) => {
   }
 };
 
-// Add to userController.js
+// Get Admins by Restaurant
 const getAdminsByRestaurant = async (req, res, next) => {
   try {
     const { restaurantId } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Invalid restaurant ID format",
+      });
+    }
+
     const admins = await User.find({
       role: "restaurant_admin",
       restaurantId: new mongoose.Types.ObjectId(restaurantId),
-    }).select("-password");
+    }).select("-password -__v");
 
     res.status(200).json({
       status: "success",
+      results: admins.length,
       data: {
         admins,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Remove Restaurant Admin
+const removeRestaurantAdmin = async (req, res, next) => {
+  try {
+    const { adminId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(adminId)) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Invalid admin ID format",
+      });
+    }
+
+    const admin = await User.findOneAndDelete({
+      _id: adminId,
+      role: "restaurant_admin",
+    });
+
+    if (!admin) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Restaurant admin not found",
+      });
+    }
+
+    res.status(204).json({
+      status: "success",
+      data: null,
     });
   } catch (error) {
     next(error);
@@ -318,7 +394,15 @@ const registerCustomer = async (req, res, next) => {
 // Function to register a new Delivery Person
 const registerDeliveryPerson = async (req, res, next) => {
   try {
-    const { name, phone, nicOrLicense, vehicleType, vehicleNumber, documents } = req.body;
+    const {
+      name,
+      password,
+      phone,
+      nicOrLicense,
+      vehicleType,
+      vehicleNumber,
+      documents,
+    } = req.body;
 
     // Check if the phone number is already in use
     const existingUser = await User.findOne({ phone });
@@ -329,6 +413,7 @@ const registerDeliveryPerson = async (req, res, next) => {
     // Create the new delivery person in the User model
     const deliveryPerson = await User.create({
       name,
+      password: await passwordUtils.hashPassword(password),
       phone,
       role: "delivery_personnel",
       nicOrLicense,
@@ -336,10 +421,10 @@ const registerDeliveryPerson = async (req, res, next) => {
         type: vehicleType,
         number: vehicleNumber,
       },
-      documents,  // URL paths to the uploaded documents
-      status: "pending",  // Default status for delivery person (needs approval)
-      isActive: false,  // Default is inactive until approved
-      phoneVerified: true,  // Assuming phone is verified automatically
+      documents, // URL paths to the uploaded documents
+      status: "pending", // Default status for delivery person (needs approval)
+      isActive: false, // Default is inactive until approved
+      phoneVerified: true, // Assuming phone is verified automatically
     });
 
     // Publish the event to RabbitMQ after the delivery person is created
@@ -351,6 +436,7 @@ const registerDeliveryPerson = async (req, res, next) => {
       data: {
         user: {
           _id: deliveryPerson._id,
+          password: deliveryPerson.password,
           name: deliveryPerson.name,
           phone: deliveryPerson.phone,
           status: deliveryPerson.status,
@@ -364,7 +450,7 @@ const registerDeliveryPerson = async (req, res, next) => {
 
 // Function to publish a message to RabbitMQ when a delivery person registers
 const publishDeliveryPersonEvent = (deliveryPerson) => {
-  amqp.connect('amqp://localhost', (error, connection) => {
+  amqp.connect("amqp://localhost", (error, connection) => {
     if (error) {
       throw error;
     }
@@ -374,7 +460,7 @@ const publishDeliveryPersonEvent = (deliveryPerson) => {
         throw error;
       }
 
-      const queue = 'delivery_person_registered_queue';  // Queue for delivery person registration
+      const queue = "delivery_person_registered_queue"; // Queue for delivery person registration
       const message = JSON.stringify({
         deliveryPersonId: deliveryPerson._id,
         name: deliveryPerson.name,
@@ -395,6 +481,60 @@ const publishDeliveryPersonEvent = (deliveryPerson) => {
     }, 500);
   });
 };
+
+// ==================== DELIVERY PERSONNEL LOGIN ====================
+const loginDeliveryPerson = async (req, res, next) => {
+  try {
+    const { phone, password } = req.body;
+
+    if (!phone || !password) {
+      return res.status(400).json({ message: "Phone and password are required" });
+    }
+
+    // Find user by phone
+    const user = await User.findOne({ phone }).select("+password");
+
+    if (!user) {
+      return res.status(404).json({ message: "Delivery personnel not found" });
+    }
+
+    // Check role
+    if (user.role !== "delivery_personnel") {
+      return res.status(403).json({ message: "Access denied. Only delivery personnel can login." });
+    }
+
+    // Validate password
+    const isPasswordValid = await passwordUtils.comparePassword(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: "Invalid phone or password" });
+    }
+
+    // Check if active
+    // if (!user.isActive) {
+    //   return res.status(403).json({ message: "Account not active. Please wait for admin approval." });
+    // }
+
+    // Generate JWT
+    const token = authService.generateToken(user._id, user.role);
+
+    res.status(200).json({
+      status: "success",
+      token,
+      data: {
+        user: {
+          _id: user._id,
+          name: user.name,
+          phone: user.phone,
+          role: user.role,
+          status: user.status,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
 module.exports = {
   registerDeliveryPerson,
@@ -622,7 +762,8 @@ module.exports = {
   approveRestaurantAdmin,
   createRestaurantAdmin,
   getAdminsByRestaurant,
-
+  removeRestaurantAdmin,
+  loginDeliveryPerson,
   // Customer methods
   registerCustomer,
 

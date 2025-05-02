@@ -12,7 +12,6 @@ const userSchema = new mongoose.Schema({
     required: function () {
       return this.role !== "delivery_personnel"; // Delivery can register with phone only
     },
-    unique: true,
     lowercase: true,
     validate: [validator.isEmail, "Please provide a valid email"],
   },
@@ -62,7 +61,6 @@ const userSchema = new mongoose.Schema({
     enum: ["pending", "approved", "rejected", "active"],
     default: function () {
       if (this.role === "delivery_personnel") return "pending";
-      if (this.role === "restaurant_admin") return "pending";
       return "active";
     },
   },
@@ -116,6 +114,14 @@ const userSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+
+userSchema.index(
+  { email: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { role: { $ne: "delivery_personnel" } },
+  }
+);
 
 userSchema.pre("save", function (next) {
   this.updatedAt = Date.now();

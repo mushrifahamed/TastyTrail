@@ -64,7 +64,54 @@ const mongoose = require("mongoose");
 const authService = require("../services/authService");
 const { sendEmail } = require("../services/emailService");
 const passwordUtils = require("../utils/passwordUtils");
+const axios = require('axios');
 const { JWT_SECRET, JWT_EXPIRES_IN } = process.env;
+const amqp = require("amqplib/callback_api");
+
+// ==================== TOKEN VERIFICATION ====================
+const verifyToken = async (req, res, next) => {
+  try {
+    // Get token from header
+
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({ message: "No token provided" });
+    }
+
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Get user from database
+    const user = await User.findById(decoded.id).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Return user information
+    res.status(200).json({
+      status: "success",
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isActive: user.isActive,
+        // Include any other relevant user info
+      },
+    });
+  } catch (error) {
+    if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({ message: "Token expired" });
+    }
+    next(error);
+  }
+};
 
 // ==================== ADMIN METHODS ====================
 const createAdmin = async (req, res, next) => {
@@ -101,53 +148,118 @@ const createAdmin = async (req, res, next) => {
 };
 
 // ==================== RESTAURANT ADMIN METHODS ====================
-const requestRestaurantAdminAccess = async (req, res, next) => {
+
+  // Create a new Restaurant Admin
+  const createRestaurantAdmin = async (req, res, next) => {
+    try {
+      console.log("Incoming request body:", req.body); // Log the entire request
+      const { name, email, phone, password, restaurantId } = req.body;
+
+      // Validate required fields
+      if (!name || !email || !phone || !restaurantId) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Name, email, phone and restaurantId are required'
+        });
+      }
+
+      // Validate restaurant exists (call restaurant service)
+      try {
+        const restaurantResponse = await axios.get(
+          `${process.env.RESTAURANT_SERVICE_URL}/api/restaurants/verify/${restaurantId}`,
+          {
+            headers: {
+              Authorization: req.headers.authorization
+            }
+          }
+        );
+        
+        if (!restaurantResponse.data || restaurantResponse.data.status !== 'success') {
+          return res.status(404).json({ 
+            status: 'fail',
+            message: 'Restaurant not found' 
+          });
+        }
+      } catch (err) {
+        console.error('Error verifying restaurant:', err);
+        return res.status(404).json({ 
+          status: 'fail',
+          message: 'Restaurant verification failed' 
+        });
+      }
+
+      // Check if user already exists
+      const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+      if (existingUser) {
+        return res.status(400).json({ 
+          status: 'fail',
+          message: 'Email or phone already in use' 
+        });
+      }
+
+      // Generate password if not provided
+      const adminPassword = password || passwordUtils.generateRandomPassword();
+
+      // Create the restaurant admin
+      const restaurantAdmin = await User.create({
+        name,
+        email,
+        phone,
+        password: await passwordUtils.hashPassword(adminPassword),
+        role: 'restaurant_admin',
+        isActive: true,
+        restaurantId: new mongoose.Types.ObjectId(restaurantId),
+        emailVerified: true,
+        phoneVerified: true,
+      });
+
+      // Remove sensitive data before sending response
+      restaurantAdmin.password = undefined;
+
+      // Send welcome email
+      try {
+        await sendEmail(
+          email,
+          'Welcome as Restaurant Admin',
+          `Hello ${name},\n\nYou have been assigned as the admin for restaurant ${restaurantId}.\n\nYour login credentials:\nEmail: ${email}\nPassword: ${adminPassword}`
+        );
+      } catch (emailError) {
+        console.error('Failed to send welcome email:', emailError);
+      }
+
+      res.status(201).json({
+        status: 'success',
+        data: {
+          user: restaurantAdmin
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+// Get Admins by Restaurant
+const getAdminsByRestaurant = async (req, res, next) => {
   try {
-    const { name, email, phone, restaurantName, licenseNumber, address } =
-      req.body;
+    const { restaurantId } = req.params;
 
-    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
-    if (existingUser) {
-      return res.status(400).json({ message: "Email or phone already in use" });
+    if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Invalid restaurant ID format",
+      });
     }
 
-    const restaurantAdmin = await User.create({
-      name,
-      email,
-      phone,
+    const admins = await User.find({
       role: "restaurant_admin",
-      isActive: false,
-      status: "pending",
-      phoneVerified: true, // Automatically verify phone without OTP
-      restaurantDetails: {
-        name: restaurantName,
-        licenseNumber,
-        address,
-      },
-    });
+      restaurantId: new mongoose.Types.ObjectId(restaurantId),
+    }).select("-password -__v");
 
-    if (email) {
-      await sendEmail(
-        restaurantAdmin.email,
-        "New restaurant admin request",
-        `New restaurant admin request from ${restaurantName}`
-      );
-    }
-    // // Notify super admin about new request
-    // await notificationService.sendAdminNotification(
-    //   "New restaurant admin request",
-    //   `New restaurant admin request from ${restaurantName}`
-    // );
-
-    res.status(201).json({
-      status: "success",
-      message: "Request submitted for approval",
+    res.status(200).json({
+      status: 'success',
+      results: admins.length,
       data: {
-        user: {
-          _id: restaurantAdmin._id,
-          name: restaurantAdmin.name,
-          email: restaurantAdmin.email,
-        },
+        admins,
       },
     });
   } catch (error) {
@@ -155,6 +267,95 @@ const requestRestaurantAdminAccess = async (req, res, next) => {
   }
 };
 
+// Remove Restaurant Admin
+const removeRestaurantAdmin = async (req, res, next) => {
+  try {
+    const { adminId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(adminId)) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Invalid admin ID format",
+
+      });
+    }
+
+    const admin = await User.findOneAndDelete({
+      _id: adminId,
+      role: "restaurant_admin",
+    });
+
+    if (!admin) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Restaurant admin not found",
+      });
+    }
+
+    res.status(204).json({
+      status: "success",
+      data: null,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// const requestRestaurantAdminAccess = async (req, res, next) => {
+//   try {
+//     const { name, email, phone, restaurantName, licenseNumber, address } =
+//       req.body;
+
+//     const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+//     if (existingUser) {
+//       return res.status(400).json({ message: "Email or phone already in use" });
+//     }
+
+//     const restaurantAdmin = await User.create({
+//       name,
+//       email,
+//       phone,
+//       role: "restaurant_admin",
+//       isActive: false,
+//       status: "pending",
+//       phoneVerified: true, // Automatically verify phone without OTP
+//       restaurantDetails: {
+//         name: restaurantName,
+//         licenseNumber,
+//         address,
+//       },
+//     });
+
+//     if (email) {
+//       await sendEmail(
+//         restaurantAdmin.email,
+//         "New restaurant admin request",
+//         `New restaurant admin request from ${restaurantName}`
+//       );
+//     }
+//     // // Notify super admin about new request
+//     // await notificationService.sendAdminNotification(
+//     //   "New restaurant admin request",
+//     //   `New restaurant admin request from ${restaurantName}`
+//     // );
+
+//     res.status(201).json({
+//       status: "success",
+//       message: "Request submitted for approval",
+//       data: {
+//         user: {
+//           _id: restaurantAdmin._id,
+//           name: restaurantAdmin.name,
+//           email: restaurantAdmin.email,
+//         },
+//       },
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+
+// Approve Restaurant Admin
 const approveRestaurantAdmin = async (req, res, next) => {
   try {
     const { userId, restaurantId } = req.body;
@@ -248,16 +449,19 @@ const registerCustomer = async (req, res, next) => {
 };
 
 // ==================== DELIVERY PERSONNEL METHODS ====================
+// Function to register a new Delivery Person
 const registerDeliveryPerson = async (req, res, next) => {
   try {
-    const { name, phone, nicOrLicense, vehicleType, vehicleNumber } = req.body;
-    const documents = req.files?.map((file) => file.path); // Assuming you're using multer
+    const { name, phone, nicOrLicense, vehicleType, vehicleNumber, documents } =
+      req.body;
 
+    // Check if the phone number is already in use
     const existingUser = await User.findOne({ phone });
     if (existingUser) {
       return res.status(400).json({ message: "Phone number already in use" });
     }
 
+    // Create the new delivery person in the User model
     const deliveryPerson = await User.create({
       name,
       phone,
@@ -267,21 +471,18 @@ const registerDeliveryPerson = async (req, res, next) => {
         type: vehicleType,
         number: vehicleNumber,
       },
-      documents,
-      status: "pending",
-      isActive: false,
-      phoneVerified: true, // Automatically verify phone without OTP
+      documents, // URL paths to the uploaded documents
+      status: "pending", // Default status for delivery person (needs approval)
+      isActive: false, // Default is inactive until approved
+      phoneVerified: true, // Assuming phone is verified automatically
     });
 
-    // // Notify admin about new delivery person registration
-    // await notificationService.sendAdminNotification(
-    //   "New delivery person registration",
-    //   `New delivery person ${name} registered and pending approval`
-    // );
+    // Publish the event to RabbitMQ after the delivery person is created
+    publishDeliveryPersonEvent(deliveryPerson);
 
     res.status(201).json({
       status: "success",
-      message: "Registration submitted for approval",
+      message: "Delivery person registration submitted for approval",
       data: {
         user: {
           _id: deliveryPerson._id,
@@ -294,6 +495,45 @@ const registerDeliveryPerson = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+};
+
+// Function to publish a message to RabbitMQ when a delivery person registers
+const publishDeliveryPersonEvent = (deliveryPerson) => {
+  amqp.connect("amqp://localhost", (error, connection) => {
+    if (error) {
+      throw error;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        throw error;
+      }
+
+      const queue = "delivery_person_registered_queue"; // Queue for delivery person registration
+      const message = JSON.stringify({
+        deliveryPersonId: deliveryPerson._id,
+        name: deliveryPerson.name,
+        phone: deliveryPerson.phone,
+        vehicleType: deliveryPerson.vehicleInfo.type,
+        vehicleLicensePlate: deliveryPerson.vehicleInfo.number,
+      });
+
+      // Make sure the queue exists and then publish the message
+      channel.assertQueue(queue, { durable: true });
+      channel.sendToQueue(queue, Buffer.from(message), { persistent: true });
+
+      console.log(`Published delivery person registration event: ${message}`);
+    });
+
+    setTimeout(() => {
+      connection.close();
+    }, 500);
+  });
+};
+
+module.exports = {
+  registerDeliveryPerson,
+  // other methods...
 };
 
 const approveDeliveryPerson = async (req, res, next) => {
@@ -508,12 +748,16 @@ const deleteUser = async (req, res, next) => {
 };
 
 module.exports = {
+  verifyToken,
   // Admin methods
   createAdmin,
 
   // Restaurant admin methods
-  requestRestaurantAdminAccess,
+  // requestRestaurantAdminAccess,
   approveRestaurantAdmin,
+  createRestaurantAdmin,
+  getAdminsByRestaurant,
+  removeRestaurantAdmin,
 
   // Customer methods
   registerCustomer,
@@ -598,7 +842,6 @@ const userSchema = new mongoose.Schema({
     enum: ["pending", "approved", "rejected", "active"],
     default: function () {
       if (this.role === "delivery_personnel") return "pending";
-      if (this.role === "restaurant_admin") return "pending";
       return "active";
     },
   },
@@ -662,19 +905,21 @@ module.exports = mongoose.model("users", userSchema);
 
 
 /* File: ./server/user-service\routes\userRoutes.js */
-// ./server/user-service/routes/userRoutes.js
-
 const express = require("express");
 const router = express.Router();
 const upload = require("../utils/multer");
 const {
+  verifyToken,
   // Admin
   createAdmin,
 
   // Restaurant Admin
-  requestRestaurantAdminAccess,
-  approveRestaurantAdmin,
-
+  //requestRestaurantAdminAccess,
+  //approveRestaurantAdmin,
+  createRestaurantAdmin,  // <-- Import the new controller for creating restaurant admin
+  getAdminsByRestaurant,
+  removeRestaurantAdmin,
+  
   // Customer
   registerCustomer,
 
@@ -695,7 +940,7 @@ const authMiddleware = require("../utils/authMiddleware");
 
 // ==================== PUBLIC ROUTES ====================
 // Restaurant admin request access
-router.post("/restaurant-admin/request", requestRestaurantAdminAccess);
+//router.post("/restaurant-admin/request", requestRestaurantAdminAccess);
 
 // Customer registration
 router.post("/customers/register", registerCustomer);
@@ -724,6 +969,7 @@ router.use(
 // Profile management (must come BEFORE any parameterized routes)
 router.get("/me", getMe);
 router.patch("/update-me", updateMe);
+router.get('/verify-token', verifyToken);
 
 // ==================== ADMIN PROTECTED ROUTES ====================
 // These routes require admin role
@@ -731,7 +977,7 @@ router.use(authMiddleware(["admin"]));
 
 // Admin user management
 router.post("/admins", createAdmin);
-router.patch("/restaurant-admin/approve", approveRestaurantAdmin);
+//router.patch("/restaurant-admin/approve", approveRestaurantAdmin);
 router.patch("/delivery/approve", approveDeliveryPerson);
 
 // User management
@@ -740,8 +986,24 @@ router.get("/:id", getUser);
 router.patch("/:id", updateUser);
 router.delete("/:id", deleteUser);
 
-module.exports = router;
+// ==================== RESTAURANT ADMIN ROUTEs ====================
 
+router.post('/restaurant-admin', 
+  authMiddleware(['admin']), 
+  createRestaurantAdmin
+);
+
+router.get('/restaurant/:restaurantId/admins', 
+  authMiddleware(['admin']), 
+  getAdminsByRestaurant
+);
+
+router.delete('/restaurant-admin/:adminId', 
+  authMiddleware(['admin']), 
+  removeRestaurantAdmin
+);
+
+module.exports = router;
 
 /* File: ./server/user-service\services\authService.js */
 const jwt = require("jsonwebtoken");

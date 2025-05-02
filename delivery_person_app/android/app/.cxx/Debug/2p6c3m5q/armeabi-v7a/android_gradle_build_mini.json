@@ -1,0 +1,20 @@
+{
+  "buildFiles": [
+    "/Users/beteam/Downloads/flutter/packages/flutter_tools/gradle/src/main/groovy/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/Users/beteam/Library/Android/sdk/cmake/3.22.1/bin/ninja",
+      "-C",
+      "/Users/beteam/Desktop/TastyTrail/TastyTrail/delivery_person_app/android/app/.cxx/Debug/2p6c3m5q/armeabi-v7a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/Users/beteam/Library/Android/sdk/cmake/3.22.1/bin/ninja",
+    "-C",
+    "/Users/beteam/Desktop/TastyTrail/TastyTrail/delivery_person_app/android/app/.cxx/Debug/2p6c3m5q/armeabi-v7a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {}
+}
