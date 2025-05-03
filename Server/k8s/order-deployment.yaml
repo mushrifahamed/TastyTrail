@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      containers:
+      - name: order-service
+        image: tastytrail/order-service:latest
+        ports:
+        - containerPort: 3002
+        env:
+        - name: PORT
+          value: "3002"
+        - name: MONGODB_URI
+          value: "mongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/order_service"
+        - name: JWT_SECRET
+          value: "8d19328e0c28fc230954c990d291c62e4ec0e8124a583c00efe0f412842f299e9b74fcc9cb2bc88331f1f3a5346e03bb95ff938d5843855bb690d4edbfcc0baf"
+
+        # Service URLs (Kubernetes service names)
+        - name: RESTAURANT_SERVICE_URL
+          value: "http://restaurant-service:3001"
+        - name: PAYMENT_SERVICE_URL
+          value: "http://payment-service:3003"
+        - name: NOTIFICATION_SERVICE_URL
+          value: "http://notification-service:3005"
+        - name: USER_SERVICE_URL
+          value: "http://user-service:3000"
+
+        - name: INTERNAL_API_KEY
+          value: "47a4768588747092df308bd0417c3efaade97ff8ba47d17ba90720be55f6c62f"
+        - name: RABBITMQ_URL
+          value: "amqp://rabbitmq"
+        - name: RABBITMQ_HOST
+          value: "rabbitmq" 

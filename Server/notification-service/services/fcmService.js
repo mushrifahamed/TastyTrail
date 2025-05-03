@@ -15,4 +15,27 @@ const sendNotification = async (token, title, body, data = {}) => {
   return await admin.messaging().send(message);
 };
 
-module.exports = { sendNotification };
+const sendNotificationflutter = async (token, title, body, data = {}) => {
+  try {
+    const message = {
+      notification: {
+        title,
+        body,
+      },
+      data: {
+        ...data,
+        click_action: "FLUTTER_NOTIFICATION_CLICK",
+      },
+      token,
+    };
+
+    const response = await admin.messaging().send(message);
+    console.log("Successfully sent message:", response);
+    return response;
+  } catch (error) {
+    console.error("Error sending notification:", error);
+    throw error;
+  }
+};
+
+module.exports = { sendNotification, sendNotificationflutter };

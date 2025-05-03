@@ -686,9 +686,9 @@ const getOrderWithSubOrders = async (req, res, next) => {
 // Get orders by customer
 const getCustomerOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find({ customerId: req.params.customerId })
-      .sort({ createdAt: -1 })
-      .populate("restaurantId", "name");
+    const orders = await Order.find({ customerId: req.params.customerId }).sort(
+      { createdAt: -1 }
+    );
 
     res.json(orders);
   } catch (error) {

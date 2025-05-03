@@ -14,6 +14,11 @@ const {
 } = require("../controllers/orderController");
 const authMiddleware = require("../utils/authMiddleware");
 
+const { quickCreateOrder } = require('../controllers/quickOrderController');
+
+// POST /api/quick-order
+router.post('/quick-order', quickCreateOrder);
+
 // Customer routes
 router.post("/", authMiddleware(["customer"]), createOrder);
 router.get(
@@ -47,7 +52,7 @@ router.get(
 // Order tracking routes
 router.patch(
   "/:orderId/status",
-  authMiddleware(["restaurant_admin", "delivery_personnel"]),
+  authMiddleware(["restaurant_admin", "delivery_personnel", "admin"]),
   updateOrderStatus
 );
 

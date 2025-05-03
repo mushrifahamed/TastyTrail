@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-service
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      containers:
+      - name: notification-service
+        image: tastytrail/notification-service:latest
+        ports:
+        - containerPort: 3005
+        env:
+        - name: RABBITMQ_URL
+          value: "amqp://rabbitmq"
+        - name: PORT
+          value: "3005"
+        - name: MONGODB_URI
+          value: "mongodb+srv://segroup80:se1234@cluster0.kjwdf.mongodb.net/notification_service"

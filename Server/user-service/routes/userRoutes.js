@@ -6,6 +6,8 @@ const {
   // Admin
   createAdmin,
 
+
+
   // Restaurant Admin
   //requestRestaurantAdminAccess,
   //approveRestaurantAdmin,
@@ -19,7 +21,7 @@ const {
   // Delivery
   registerDeliveryPerson,
   approveDeliveryPerson,
-
+  loginDeliveryPerson,
   // Common
   login,
   getMe,
@@ -31,10 +33,13 @@ const {
 } = require("../controllers/userController");
 const authMiddleware = require("../utils/authMiddleware");
 
+const userController = require('../controllers/userController');
+
+
 // ==================== PUBLIC ROUTES ====================
 // Restaurant admin request access
 //router.post("/restaurant-admin/request", requestRestaurantAdminAccess);
-
+router.post('/login-delivery', loginDeliveryPerson);
 // Customer registration
 router.post("/customers/register", registerCustomer);
 

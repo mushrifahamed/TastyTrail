@@ -5,6 +5,7 @@ import 'package:delivery_person_app/screens/tabs/HomeTab.dart';
 import 'package:delivery_person_app/screens/tabs/delivery_history_tab.dart';
 import 'package:delivery_person_app/screens/tabs/earnings_tab.dart';
 import 'package:delivery_person_app/screens/tabs/profile_tab.dart';
+import 'package:delivery_person_app/services/DeliveryNotificationService.dart';
 import 'package:flutter/material.dart';
 
 
@@ -18,6 +19,13 @@ class DashBoard extends StatefulWidget {
 class _DashBoardState extends State<DashBoard> {
   int _selectedIndex = 0;
   bool _isOnline = false;
+
+  @override
+void initState() {
+  super.initState();
+  DeliveryNotificationService().initialize(context);
+}
+
 
   @override
   Widget build(BuildContext context) {

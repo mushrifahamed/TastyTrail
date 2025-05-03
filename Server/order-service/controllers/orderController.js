@@ -13,9 +13,11 @@ const amqp = require("amqplib/callback_api");
 require('dotenv').config();
 
 // Function to publish an event to RabbitMQ
-// Function to publish the order created event to RabbitMQ
+const rabbitmqHost = process.env.RABBITMQ_HOST || 'localhost'; // Smart
+const rabbitmqURL = `amqp://${rabbitmqHost}`;
+
 const publishOrderCreatedEvent = (orderId) => {
-  amqp.connect("amqp://localhost", (error, connection) => {
+  amqp.connect(rabbitmqURL, (error, connection) => {
     if (error) {
       throw error;
     }
@@ -39,6 +41,7 @@ const publishOrderCreatedEvent = (orderId) => {
     }, 500);
   });
 };
+
 
 // Create a new order with items from a single restaurant
 const createOrder = async (req, res, next) => {
@@ -181,9 +184,9 @@ const getOrderWithSubOrders = async (req, res, next) => {
 // Get orders by customer
 const getCustomerOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find({ customerId: req.params.customerId })
-      .sort({ createdAt: -1 })
-      .populate("restaurantId", "name");
+    const orders = await Order.find({ customerId: req.params.customerId }).sort(
+      { createdAt: -1 }
+    );
 
     res.json(orders);
   } catch (error) {
@@ -264,31 +267,33 @@ const updateOrderStatus = async (req, res, next) => {
 
     // Update tracking status
     order.trackingStatus = status;
-
-    // Add to status updates history
     order.statusUpdates.push({
       status,
       timestamp: Date.now(),
       note: note || "",
     });
 
-    // If status is out_for_delivery, assign delivery person
-    if (
-      status === "out_for_delivery" &&
-      req.user.role === "delivery_personnel"
-    ) {
-      order.deliveryPersonId = req.user.id;
-    }
-
     await order.save();
 
-    // Notify customer about status update
-    await notificationService.sendNotification(
-      order.customerId,
-      "order_status_update",
-      `Your order #${order._id} is now ${status}`,
-      { orderId: order._id, status }
-    );
+    // Send notification to customer
+    try {
+      await axios.post(
+        `${process.env.NOTIFICATION_SERVICE_URL}/api/notifications/send`,
+        {
+          userId: order.customerId,
+          role: "customer",
+          title: "Order Status Update",
+          body: `Your order #${order._id} is now ${status}`,
+          data: {
+            orderId: order._id.toString(),
+            status,
+            type: "order_update",
+          },
+        }
+      );
+    } catch (notificationError) {
+      console.error("Failed to send notification:", notificationError);
+    }
 
     res.status(200).json(order);
   } catch (error) {
