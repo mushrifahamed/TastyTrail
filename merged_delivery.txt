@@ -1,0 +1,351 @@
+
+/* File: ./server/delivery-service\server.js */
+require('dotenv').config(); // Load environment variables from .env file
+const connectDB = require("./config/db");
+const express = require('express');
+const mongoose = require('mongoose');
+const http = require('http');
+const socketIo = require('socket.io');
+const messageBroker = require('./utils/messagebroker_neworder'); // Correctly import your message broker
+const deliveryRoutes = require('./routes/deliveryRoutes'); // Delivery routes
+const RegmessageBroker = require('./utils/delivery_person_register_Listner'); // Use the correct file
+
+
+const app = express();
+
+// MongoDB connection
+connectDB();
+
+// Start listening for new orders from RabbitMQ
+messageBroker.listenForNewOrders(); // Make sure listenForNewOrders() is implemented correctly
+// Start listening for delivery person registration events
+RegmessageBroker.listenForDeliveryPersonRegistration(); // Make sure listenForDeliveryPersonRegistration() is implemented correctly
+
+// Create server and setup socket.io
+const server = http.createServer(app);
+const io = socketIo(server);
+
+// Handle WebSocket connections
+io.on('connection', (socket) => {
+  console.log('A user connected');
+
+  socket.on('statusUpdate', (data) => {
+    io.emit('statusUpdate', data); // Broadcast the update to all connected clients
+  });
+
+  socket.on('disconnect', () => {
+    console.log('A user disconnected');
+  });
+});
+
+// Middleware setup (if you need to parse JSON or set headers)
+app.use(express.json()); // This will parse incoming requests with JSON payloads
+
+// Use delivery routes
+app.use('/api/delivery', deliveryRoutes);
+
+// Define the server port
+const PORT = process.env.PORT || 3008;
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
+
+
+/* File: ./server/delivery-service\config\db.js */
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const connectDB = async () => {
+    try {
+        console.log("Mongo URI: ", process.env.MONGODB_URI);  // Log the Mongo URI
+        mongoose.connect(process.env.MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+        })
+        .then(() => console.log('Connected to MongoDB'))
+        .catch(err => console.error('MongoDB connection error:', err));
+    } catch (error) {
+        console.error("Error connecting to MongoDB:", error.message);
+        process.exit(1); // Exit process with failure
+    }
+};
+
+module.exports = connectDB;
+
+/* File: ./server/delivery-service\controllers\deliveryController.js */
+const Order = require('../models/orders');
+const DeliveryPerson = require('../models/deliveryPerson');
+
+const assignDelivery = async (req, res) => {
+    const { orderId, requiredVehicleType } = req.body;
+  
+    try {
+      // Find the order by ID
+      const order = await Order.findById(orderId);
+      if (!order) {
+        return res.status(404).send({ message: 'Order not found' });
+      }
+  
+      // Find the available delivery person with the required vehicle type
+      const availableDriver = await DeliveryPerson.findOne({ 
+        availability: true,
+        vehicleType: requiredVehicleType,
+      });
+  
+      if (!availableDriver) {
+        return res.status(400).send({ message: 'No available delivery personnel with the required vehicle type' });
+      }
+  
+      // Assign delivery to the driver
+      order.deliveryPersonId = availableDriver._id;
+      order.status = 'Assigned';
+      await order.save();
+  
+      // Update the delivery person's availability
+      availableDriver.availability = false;
+      await availableDriver.save();
+  
+      res.status(200).send({ message: 'Delivery assigned', order });
+    } catch (error) {
+      console.error(error);
+      res.status(500).send({ message: 'Internal server error' });
+    }
+  };
+
+  // Get the current status of an order
+const getDeliveryStatus = async (req, res) => {
+    const { orderId } = req.params;
+    const order = await Order.findById(orderId);
+  
+    if (!order) {
+      return res.status(404).send({ message: 'Order not found' });
+    }
+  
+    res.status(200).send({ orderId, status: order.status });
+  };
+  
+  // Update the status of an order (e.g., when delivery person accepts, starts delivery, etc.)
+  const updateOrderStatus = async (req, res) => {
+    const { orderId, newStatus } = req.body;
+  
+    try {
+      const order = await Order.findById(orderId);
+      if (!order) {
+        return res.status(404).send({ message: 'Order not found' });
+      }
+  
+      // Ensure the new status is valid
+      const validStatuses = ['Pending', 'Assigned', 'Accepted', 'Picked Up', 'In Transit', 'Delivered', 'Cancelled'];
+      if (!validStatuses.includes(newStatus)) {
+        return res.status(400).send({ message: 'Invalid status' });
+      }
+  
+      // Update the order status
+      order.status = newStatus;
+      await order.save();
+  
+      // Broadcast status update to clients using Socket.io (optional, for real-time updates)
+      io.emit('statusUpdate', { orderId, newStatus }); 
+  
+      res.status(200).send({ message: 'Order status updated', order });
+    } catch (error) {
+      console.error(error);
+      res.status(500).send({ message: 'Internal server error' });
+    }
+  };
+
+  module.exports = {
+    assignDelivery,
+    getDeliveryStatus,
+    updateOrderStatus,
+  };
+
+  
+  
+
+
+/* File: ./server/delivery-service\models\deliveryPerson.js */
+const mongoose = require('mongoose');
+
+const deliveryPersonSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  phone: { type: String, required: true },
+  location: { type: String, default: "Not Provided" }, // Default value for location
+  availability: { type: Boolean, default: true },
+  vehicleType: { type: String, required: true }, 
+  vehicleLicensePlate: { type: String, required: true },
+});
+
+module.exports = mongoose.model('DeliveryPerson', deliveryPersonSchema);
+
+
+/* File: ./server/delivery-service\models\orders.js */
+const mongoose = require('mongoose');
+
+const orderSchema = new mongoose.Schema({
+  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
+  restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant' },
+  status: {
+    type: String,
+    enum: ['Pending', 'Assigned', 'Accepted', 'Picked Up', 'In Transit', 'Delivered', 'Cancelled'],
+    default: 'Pending',
+  },
+  deliveryPersonId: { type: mongoose.Schema.Types.ObjectId, ref: 'DeliveryPerson', default: null },
+  deliveryLocation: String,
+  deliveryTime: Date,
+});
+
+module.exports = mongoose.model('Order', orderSchema); 
+
+
+/* File: ./server/delivery-service\routes\deliveryRoutes.js */
+const express = require('express');
+const router = express.Router();
+const { assignDelivery, getDeliveryStatus, updateOrderStatus } = require('../controllers/deliveryController');
+
+// Route to assign a delivery to a driver
+router.post('/assign', assignDelivery);
+
+// Route to get the current status of a delivery
+router.get('/status/:orderId', getDeliveryStatus);
+
+// Route to update the status of an order
+router.put('/update-status', updateOrderStatus);  // Method for updating the status of an order
+
+module.exports = router;
+
+
+/* File: ./server/delivery-service\utils\delivery_person_register_Listner.js */
+const amqp = require('amqplib/callback_api');
+const DeliveryPerson = require('../models/deliveryPerson');  // DeliveryPerson model for saving the details
+
+// Function to listen for delivery person registration events
+const listenForDeliveryPersonRegistration = () => {
+  amqp.connect('amqp://localhost', (error, connection) => {
+    if (error) {
+      throw error;
+    }
+
+    connection.createChannel((error, channel) => {
+      if (error) {
+        throw error;
+      }
+
+      const queue = 'delivery_person_registered_queue';  // Queue name for listening
+
+      channel.assertQueue(queue, { durable: true });
+      console.log('Waiting for delivery person registration events...');
+
+      // Consume the message from the queue
+      channel.consume(queue, async (msg) => {
+        if (msg !== null) {
+          const deliveryPersonData = JSON.parse(msg.content.toString());
+          console.log(`Received delivery person event: ${deliveryPersonData.name}`);
+
+          // Save the delivery person details in the DeliveryPerson model
+          await saveDeliveryPerson(deliveryPersonData);
+
+          // Acknowledge the message after processing
+          channel.ack(msg);
+        }
+      });
+    });
+  });
+};
+
+// Function to save the delivery person in the DeliveryPerson model
+const saveDeliveryPerson = async (data) => {
+  try {
+    const newDeliveryPerson = new DeliveryPerson({
+      name: data.name,
+      phone: data.phone,
+      location: "",  // You can leave it empty or update later
+      availability: true, // Default availability
+      vehicleType: data.vehicleType,
+      vehicleLicensePlate: data.vehicleLicensePlate,
+    });
+
+    // Save the delivery person in the database
+    await newDeliveryPerson.save();
+    console.log(`Saved delivery person: ${newDeliveryPerson.name}`);
+  } catch (error) {
+    console.error('Error saving delivery person:', error);
+  }
+};
+
+// Start listening for the delivery person registration events
+listenForDeliveryPersonRegistration();
+
+module.exports = {
+  listenForDeliveryPersonRegistration,
+};
+
+
+/* File: ./server/delivery-service\utils\messagebroker_neworder.js */
+const amqp = require('amqplib/callback_api');
+const DeliveryPerson = require('../models/deliveryPerson');
+const Order = require('../models/orders');
+
+const listenForNewOrders = () => {
+    amqp.connect('amqp://localhost', (error, connection) => {
+        if (error) {
+            throw error;
+        }
+
+        connection.createChannel((error, channel) => {
+            if (error) {
+                throw error;
+            }
+
+            const queue = 'order_created_queue'; // Queue name used by Order Service
+
+            channel.assertQueue(queue, { durable: true });
+            console.log('Waiting for new orders...');
+
+            channel.consume(queue, async (msg) => {
+                if (msg !== null) {
+                    const order = JSON.parse(msg.content.toString());
+                    console.log(`Received order ID: ${order.orderId}`);
+
+                    // Process the order in the Delivery Service (assign delivery to driver)
+                    await assignDelivery(order.orderId);
+
+                    // Acknowledge the message after processing
+                    channel.ack(msg);
+                }
+            });
+        });
+    });
+};
+
+const assignDelivery = async (orderId) => {
+    try {
+        const order = await Order.findById(orderId);
+        if (!order) {
+            console.log(`Order not found: ${orderId}`);
+            return;
+        }
+
+        const availableDriver = await DeliveryPerson.findOne({ availability: true });
+        if (!availableDriver) {
+            console.log(`No available drivers for order ${orderId}`);
+            return;
+        }
+
+        // Assign the delivery to the available driver
+        order.deliveryPersonId = availableDriver._id;
+        order.status = 'Assigned';
+        await order.save();
+
+        // Update the delivery person's availability
+        availableDriver.availability = false;
+        await availableDriver.save();
+
+        console.log(`Assigned driver ${availableDriver._id} to order ${orderId}`);
+    } catch (error) {
+        console.error('Error assigning delivery:', error);
+    }
+};
+
+module.exports = { listenForNewOrders };
+

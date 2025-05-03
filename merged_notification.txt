@@ -1,0 +1,144 @@
+
+/* File: ./server/notification-service\server.js */
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+require("dotenv").config();
+const connectDB = require("./config/db");
+
+const app = express();
+connectDB();
+
+app.use(cors());
+app.use(bodyParser.json());
+
+const notificationRoutes = require("./routes/notificationRoutes");
+app.use("/api/notifications", notificationRoutes);
+
+
+
+const PORT = process.env.PORT || 3005;
+app.listen(PORT, () => console.log(`Notification Service running on port ${PORT}`));
+
+
+/* File: ./server/notification-service\config\db.js */
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log("MongoDB connected");
+  } catch (error) {
+    console.error("MongoDB connection failed", error);
+    process.exit(1);
+  }
+};
+
+module.exports = connectDB;
+
+
+/* File: ./server/notification-service\controllers\notificationController.js */
+const Token = require("../models/Token");
+const { sendNotification } = require("../services/fcmService");
+
+// Register token
+exports.registerToken = async (req, res) => {
+  const { userId, token, role } = req.body;
+
+  if (!userId || !token || !role) {
+    return res.status(400).json({ message: "Missing fields" });
+  }
+
+  const existing = await Token.findOne({ userId, role });
+  if (existing) {
+    existing.token = token;
+    existing.updatedAt = new Date();
+    await existing.save();
+  } else {
+    await Token.create({ userId, token, role });
+  }
+
+  res.json({ message: "Token registered successfully" });
+};
+
+// Send to a specific user
+exports.sendToUser = async (req, res) => {
+  const { userId, role, title, body, data } = req.body;
+
+  const user = await Token.findOne({ userId, role });
+  if (!user) return res.status(404).json({ message: "Token not found" });
+
+  try {
+    await sendNotification(user.token, title, body, data);
+    res.json({ message: "Notification sent" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to send", error: err.message });
+  }
+};
+
+// Broadcast to all users by role
+exports.broadcast = async (req, res) => {
+  const { role, title, body, data } = req.body;
+
+  const users = await Token.find({ role });
+  let results = [];
+
+  for (const user of users) {
+    try {
+      const res = await sendNotification(user.token, title, body, data);
+      results.push({ userId: user.userId, result: res });
+    } catch (err) {
+      results.push({ userId: user.userId, error: err.message });
+    }
+  }
+
+  res.json({ message: "Broadcast complete", results });
+};
+
+
+/* File: ./server/notification-service\models\Token.js */
+const mongoose = require("mongoose");
+
+const TokenSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  token: { type: String, required: true },
+  role: { type: String, enum: ["customer", "admin", "delivery"], required: true },
+  updatedAt: { type: Date, default: Date.now },
+});
+
+module.exports = mongoose.model("Token", TokenSchema);
+
+
+/* File: ./server/notification-service\routes\notificationRoutes.js */
+const express = require("express");
+const router = express.Router();
+const controller = require("../controllers/notificationController");
+
+router.post("/register", controller.registerToken);
+router.post("/sendToUser", controller.sendToUser);
+router.post("/broadcast", controller.broadcast);
+
+module.exports = router;
+
+
+/* File: ./server/notification-service\services\fcmService.js */
+const admin = require("firebase-admin");
+const serviceAccount = require("../tastytrail-c628e-firebase-adminsdk-fbsvc-d49e61e481.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+const sendNotification = async (token, title, body, data = {}) => {
+  const message = {
+    token,
+    notification: { title, body },
+    data,
+  };
+
+  return await admin.messaging().send(message);
+};
+
+module.exports = { sendNotification };
+
