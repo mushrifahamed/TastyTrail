@@ -62,5 +62,28 @@ exports.broadcast = async (req, res) => {
     }
   }
 
+  
+
   res.json({ message: "Broadcast complete", results });
 };
+
+
+exports.logout = async (req, res) => {
+  const { userId, token, role } = req.body;
+
+  if (!userId || !token || !role) {
+    return res.status(400).json({ message: "Missing fields" });
+  }
+
+  try {
+    const result = await Token.findOneAndDelete({ userId, token, role });
+    if (!result) {
+      return res.status(404).json({ message: "Token not found or already deleted" });
+    }
+
+    res.json({ message: "Token deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to delete token", error: err.message });
+  }
+};
+

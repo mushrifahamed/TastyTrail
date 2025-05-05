@@ -113,14 +113,14 @@ const assignDelivery = async (deliveryOrderId) => {
       return;
     }
 
-    order.deliveryPersonId = availableDriver._id;
+    order.deliveryPersonId = availableDriver.userId;
     order.status = 'Assigned';
     await order.save();
 
     availableDriver.availability = false;
     await availableDriver.save();
 
-    console.log(`✅ Assigned driver ${availableDriver._id} to order ${deliveryOrderId}`);
+    console.log(`✅ Assigned driver ${availableDriver.userId} to order ${deliveryOrderId}`);
   } catch (error) {
     console.error('❌ Error assigning delivery:', error.message);
   }

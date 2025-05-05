@@ -4,6 +4,7 @@ import 'package:delivery_person_app/screens/DashboardScreen.dart';
 import 'package:delivery_person_app/screens/HomeScreen.dart';
 import 'package:delivery_person_app/screens/SignupScreen.dart';
 import 'package:delivery_person_app/services/ApiService.dart';
+import 'package:delivery_person_app/theme/apptheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -173,13 +174,13 @@ class _LoginScreenState extends State<LoginScreen> {
           height: 70,
           width: 70,
           decoration: BoxDecoration(
-            color: Colors.blue.shade50,
+            color: const Color.fromARGB(255, 241, 241, 241),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Icon(
             Icons.lock_outline_rounded,
             size: 40,
-            color: Colors.blue.shade800,
+            color: AppColors.primary,
           ),
         ),
         const SizedBox(height: 24),
@@ -331,7 +332,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Text(
             'Forgot password?',
             style: TextStyle(
-              color: Colors.blue.shade700,
+              color: AppColors.primary,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -344,7 +345,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return ElevatedButton(
       onPressed: _submitForm,
       style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.blue.shade800,
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(vertical: 16),
         shape: RoundedRectangleBorder(
@@ -436,7 +437,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Text(
             'Sign Up',
             style: TextStyle(
-              color: Colors.blue.shade700,
+              color:AppColors.primary,
               fontWeight: FontWeight.bold,
             ),
           ),

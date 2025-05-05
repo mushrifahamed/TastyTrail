@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:delivery_person_app/screens/login_screen.dart';
+import 'package:delivery_person_app/theme/apptheme.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ProfileTab extends StatelessWidget {
@@ -26,7 +30,7 @@ class ProfileTab extends StatelessWidget {
       children: [
         const CircleAvatar(
           radius: 50,
-          backgroundColor: Colors.deepPurple,
+          backgroundColor: AppColors.primary,
           child: Icon(Icons.person, size: 50, color: Colors.white),
         ),
         const SizedBox(height: 16),
@@ -162,15 +166,45 @@ class ProfileTab extends StatelessWidget {
         ),
         const SizedBox(height: 16),
        OutlinedButton.icon(
-  onPressed: () async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('auth_token');
+ onPressed: () async {
+  final prefs = await SharedPreferences.getInstance();
 
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (route) => false,
-    );
-  },
+  final userId = prefs.getString('user_id');
+  final fcmToken = prefs.getString('fcm_token');
+  final role = prefs.getString('role'); // e.g., "delivery_personnel"
+
+  if (userId != null && fcmToken != null && role != null) {
+    try {
+      final response = await http.post(
+        Uri.parse('http://10.0.2.2:3005/api/notifications/logout'), // replace with your backend URL
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'userId': userId,
+          'token': fcmToken,
+          'role': role,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        print('✅ Token deleted');
+      } else {
+        print('⚠️ Token delete failed: ${response.body}');
+      }
+    } catch (e) {
+      print('❌ Logout error: $e');
+    }
+  }
+
+  // Clear auth data
+  await prefs.clear();
+
+  // Navigate to login
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => const LoginScreen()),
+    (route) => false,
+  );
+},
+
   icon: Icon(Icons.logout, color: Colors.red.shade700),
   label: Text(
     'Logout',
@@ -207,7 +241,7 @@ class ProfileTab extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(icon, color: Colors.deepPurple, size: 20),
+            Icon(icon, color: AppColors.primary, size: 20),
             const SizedBox(width: 16),
             Expanded(
               child: Text(

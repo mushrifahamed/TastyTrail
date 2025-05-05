@@ -462,7 +462,7 @@ const publishDeliveryPersonEvent = (deliveryPerson) => {
 
       const queue = "delivery_person_registered_queue"; // Queue for delivery person registration
       const message = JSON.stringify({
-        deliveryPersonId: deliveryPerson._id,
+        userId: deliveryPerson._id,
         name: deliveryPerson.name,
         phone: deliveryPerson.phone,
         vehicleType: deliveryPerson.vehicleInfo.type,

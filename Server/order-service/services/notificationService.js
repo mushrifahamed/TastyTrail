@@ -1,28 +1,22 @@
+// services/notificationService.js
+
 const axios = require("axios");
-require("dotenv").config();
 
-const { NOTIFICATION_SERVICE_URL } = process.env;
+const NOTIFICATION_SERVICE_URL = process.env.NOTIFICATION_SERVICE_URL || "http://localhost:3005";
 
-module.exports = {
-  sendNotification: async (userId, type, message, metadata) => {
-    try {
-      // Check if notification service URL is defined
-      if (!NOTIFICATION_SERVICE_URL) {
-        console.log(
-          "Notification service URL not defined, skipping notification"
-        );
-        return;
-      }
+exports.sendNotification = async (userId, role, title, body, data) => {
+  try {
+    const res = await axios.post(`${NOTIFICATION_SERVICE_URL}/api/notifications/sendToUser`, {
+      userId,
+      role,
+      title,
+      body,
+      data
+    });
 
-      await axios.post(`${NOTIFICATION_SERVICE_URL}/api/notifications`, {
-        userId,
-        type,
-        message,
-        metadata,
-      });
-    } catch (error) {
-      console.error("Error sending notification:", error.message);
-      // Fail silently as notification is not critical
-    }
-  },
+    return res.data;
+  } catch (err) {
+    console.error("❌ Failed to send notification:", err.response?.data || err.message);
+    throw err;
+  }
 };

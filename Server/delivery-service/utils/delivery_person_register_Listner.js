@@ -35,7 +35,7 @@ const listenForDeliveryPersonRegistration = () => {
 const saveDeliveryPerson = async (data) => {
   try {
     const newDeliveryPerson = new DeliveryPerson({
-      userId: data.deliveryPersonId, // <- Save User _id here
+      userId: data.userId, // <- Save User _id here
       name: data.name,
       phone: data.phone,
       role: data.role || 'delivery_personnel',

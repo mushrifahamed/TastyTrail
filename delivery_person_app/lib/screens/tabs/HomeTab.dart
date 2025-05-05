@@ -1,4 +1,5 @@
 import 'package:delivery_person_app/models/deliveryModel.dart';
+import 'package:delivery_person_app/theme/apptheme.dart';
 import 'package:flutter/material.dart';
 
 class HomeTab extends StatelessWidget {
@@ -17,6 +18,7 @@ final Map<String, dynamic> earningsData;
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
+    
       padding: const EdgeInsets.all(16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -53,7 +55,7 @@ Widget _buildSummaryCards() {
             title: 'Total Orders',
             value: (activeDeliveries.length + completedDeliveries.length).toString(),
             icon: Icons.receipt_long_outlined,
-            color: Colors.deepPurple,
+            color: AppColors.primary,
           ),
         ),
       ],
@@ -128,7 +130,7 @@ Widget _buildSummaryCards() {
           child: Text(
             actionText,
             style: TextStyle(
-              color: Colors.deepPurple.shade700,
+              color: AppColors.primary,
             ),
           ),
         ),
@@ -178,12 +180,12 @@ Widget _buildSummaryCards() {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.deepPurple.shade50,
+            color: AppColors.primary,
             borderRadius: BorderRadius.circular(8),
           ),
           child: const Icon(
             Icons.check_circle_outline,
-            color: Colors.deepPurple,
+            color: AppColors.primary,
             size: 24,
           ),
         ),
@@ -287,7 +289,7 @@ Widget _buildSummaryCards() {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.deepPurple.shade50,
+            color: AppColors.primary,
             borderRadius: const BorderRadius.only(
               topLeft: Radius.circular(12),
               topRight: Radius.circular(12),
@@ -356,7 +358,7 @@ Widget _buildSummaryCards() {
                         // Navigation logic
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.deepPurple,
+                        backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
@@ -373,8 +375,8 @@ Widget _buildSummaryCards() {
                         // Call customer logic
                       },
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.deepPurple,
-                        side: BorderSide(color: Colors.deepPurple.shade300),
+                        foregroundColor: AppColors.primary,
+                        side: BorderSide(color: AppColors.primary),
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),

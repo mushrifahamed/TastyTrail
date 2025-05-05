@@ -1,3 +1,4 @@
+import 'package:delivery_person_app/theme/apptheme.dart';
 import 'package:flutter/material.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -90,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: _buildAppBar(),
       body: _getBody(),
       bottomNavigationBar: _buildBottomNavigationBar(),
@@ -135,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
           onPressed: () {
             // Navigate to notifications screen
           },
-          color: Colors.deepPurple,
+          color:AppColors.primary,
         ),
       ],
     );
@@ -150,7 +152,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _selectedIndex = index;
         });
       },
-      selectedItemColor: Colors.deepPurple,
+      selectedItemColor:AppColors.primary,
       unselectedItemColor: Colors.grey,
       items: const [
         BottomNavigationBarItem(
@@ -219,7 +221,7 @@ class _HomeScreenState extends State<HomeScreen> {
             title: 'Total Orders',
             value: (_activeDeliveries.length + _completedDeliveries.length).toString(),
             icon: Icons.receipt_long_outlined,
-            color: Colors.deepPurple,
+            color:AppColors.primary,
           ),
         ),
       ],
@@ -294,7 +296,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Text(
             actionText,
             style: TextStyle(
-              color: Colors.deepPurple.shade700,
+              color:AppColors.primary,
             ),
           ),
         ),
@@ -337,7 +339,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.deepPurple.shade50,
+              color:AppColors.primary,
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(12),
                 topRight: Radius.circular(12),
@@ -405,7 +407,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           // Navigation logic
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.deepPurple,
+                          backgroundColor:AppColors.primary,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
@@ -422,8 +424,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           // Call customer
                         },
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.deepPurple,
-                          side: BorderSide(color: Colors.deepPurple.shade300),
+                          foregroundColor:AppColors.primary,
+                          side: BorderSide(color:AppColors.primary),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -505,12 +507,12 @@ class _HomeScreenState extends State<HomeScreen> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.deepPurple.shade50,
+              color:AppColors.primary,
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(
               Icons.check_circle_outline,
-              color: Colors.deepPurple,
+              color:AppColors.primary,
               size: 24,
             ),
           ),
@@ -752,7 +754,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.deepPurple.shade50,
+        color:AppColors.primary,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -771,7 +773,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.deepPurple.shade100,
+                  color:AppColors.primary,
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: const Text(
@@ -779,7 +781,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
-                    color: Colors.deepPurple,
+                    color:AppColors.primary,
                   ),
                 ),
               ),
@@ -791,7 +793,7 @@ class _HomeScreenState extends State<HomeScreen> {
             style: const TextStyle(
               fontSize: 32,
               fontWeight: FontWeight.bold,
-              color: Colors.deepPurple,
+              color:AppColors.primary,
             ),
           ),
           const SizedBox(height: 16),
@@ -829,7 +831,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
       decoration: BoxDecoration(
-        color: isHighlighted ? Colors.deepPurple.shade100 : Colors.white,
+        color: isHighlighted ?AppColors.primary : Colors.white,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -838,7 +840,7 @@ class _HomeScreenState extends State<HomeScreen> {
             label,
             style: TextStyle(
               fontSize: 12,
-              color: isHighlighted ? Colors.deepPurple.shade800 : Colors.grey.shade600,
+              color: isHighlighted ?AppColors.primary : Colors.grey.shade600,
             ),
           ),
           const SizedBox(height: 4),
@@ -847,7 +849,7 @@ class _HomeScreenState extends State<HomeScreen> {
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: isHighlighted ? Colors.deepPurple.shade800 : Colors.black,
+              color: isHighlighted ?AppColors.primary : Colors.black,
             ),
           ),
         ],
@@ -876,10 +878,10 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.deepPurple : Colors.transparent,
+          color: isSelected ?AppColors.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? Colors.deepPurple : Colors.grey.shade300,
+            color: isSelected ?AppColors.primary : Colors.grey.shade300,
           ),
         ),
         child: Text(
@@ -1069,7 +1071,7 @@ class _HomeScreenState extends State<HomeScreen> {
     children: [
       const CircleAvatar(
         radius: 50,
-        backgroundColor: Colors.deepPurple,
+        backgroundColor:AppColors.primary,
         child: Icon(
           Icons.person,
           size: 50,
@@ -1304,7 +1306,7 @@ Widget _buildProfileOptionItem({
         children: [
           Icon(
             icon,
-            color: Colors.deepPurple,
+            color:AppColors.primary,
             size: 20,
           ),
           const SizedBox(width: 16),

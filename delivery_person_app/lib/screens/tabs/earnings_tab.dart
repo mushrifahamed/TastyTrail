@@ -1,3 +1,4 @@
+import 'package:delivery_person_app/theme/apptheme.dart';
 import 'package:flutter/material.dart';
 import 'package:delivery_person_app/models/PaymentModel.dart';
 
@@ -34,7 +35,7 @@ class EarningsTab extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.deepPurple.shade50,
+        color: AppColors.primary,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -53,7 +54,7 @@ class EarningsTab extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.deepPurple.shade100,
+                  color: AppColors.primary,
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: const Text(
@@ -61,7 +62,7 @@ class EarningsTab extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
-                    color: Colors.deepPurple,
+                    color: AppColors.primary,
                   ),
                 ),
               ),
@@ -73,7 +74,7 @@ class EarningsTab extends StatelessWidget {
             style: const TextStyle(
               fontSize: 32,
               fontWeight: FontWeight.bold,
-              color: Colors.deepPurple,
+              color: AppColors.primary,
             ),
           ),
           const SizedBox(height: 16),
@@ -101,7 +102,7 @@ class EarningsTab extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
       decoration: BoxDecoration(
-        color: isHighlighted ? Colors.deepPurple.shade100 : Colors.white,
+        color: isHighlighted ? AppColors.primary : Colors.white,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -110,7 +111,7 @@ class EarningsTab extends StatelessWidget {
             label,
             style: TextStyle(
               fontSize: 12,
-              color: isHighlighted ? Colors.deepPurple.shade800 : Colors.grey.shade600,
+              color: isHighlighted ? AppColors.primary : Colors.grey.shade600,
             ),
           ),
           const SizedBox(height: 4),
@@ -119,7 +120,7 @@ class EarningsTab extends StatelessWidget {
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: isHighlighted ? Colors.deepPurple.shade800 : Colors.black,
+              color: isHighlighted ? AppColors.primary : Colors.black,
             ),
           ),
         ],
@@ -148,10 +149,10 @@ class EarningsTab extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.deepPurple : Colors.transparent,
+          color: isSelected ? AppColors.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? Colors.deepPurple : Colors.grey.shade300,
+            color: isSelected ? AppColors.primary : Colors.grey.shade300,
           ),
         ),
         child: Text(

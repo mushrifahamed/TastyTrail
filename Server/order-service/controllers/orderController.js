@@ -292,7 +292,8 @@ if (status === "ready_for_pickup") {
     // Notify customer about status update
     await notificationService.sendNotification(
       order.customerId,
-      "order_status_update",
+      "customer", // or whatever role you store for customers
+      "Order Status Update",
       `Your order #${order._id} is now ${status}`,
       { orderId: order._id, status }
     );

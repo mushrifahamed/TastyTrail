@@ -35,7 +35,12 @@ module.exports = (allowedRoles) => {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       req.user = decoded;
 
+      if(decoded.role === "admin") {
+        next();
+      }
+
       if (!allowedRoles.includes(decoded.role)) {
+        console.log(decoded.role);
         return res.status(403).json({ message: "Insufficient permissions" });
       }
 

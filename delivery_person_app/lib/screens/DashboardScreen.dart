@@ -6,6 +6,7 @@ import 'package:delivery_person_app/screens/tabs/delivery_history_tab.dart';
 import 'package:delivery_person_app/screens/tabs/earnings_tab.dart';
 import 'package:delivery_person_app/screens/tabs/profile_tab.dart';
 import 'package:delivery_person_app/services/DeliveryNotificationService.dart';
+import 'package:delivery_person_app/theme/apptheme.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -111,7 +112,7 @@ AppBar _buildAppBar() {
         onPressed: () {
           // Navigate to notifications screen
         },
-        color: Colors.deepPurple,
+        color: AppColors.primary,
       ),
     ],
   );
@@ -127,7 +128,7 @@ AppBar _buildAppBar() {
           _selectedIndex = index;
         });
       },
-      selectedItemColor: Colors.deepPurple,
+      selectedItemColor:AppColors.primary,
       unselectedItemColor: Colors.grey,
       items: const [
         BottomNavigationBarItem(

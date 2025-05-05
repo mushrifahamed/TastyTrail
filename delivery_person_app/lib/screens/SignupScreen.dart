@@ -1,3 +1,4 @@
+import 'package:delivery_person_app/theme/apptheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
@@ -153,7 +154,7 @@ class _SignupScreenState extends State<SignupScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: const Text(
-          'Create Delivery Driver Account',
+          '',
           style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
         ),
       ),
@@ -172,7 +173,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          color: Colors.deepPurple.shade800,
+                          color: AppColors.primary,
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -332,7 +333,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          color: Colors.deepPurple.shade800,
+                          color:  AppColors.primary,
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -416,7 +417,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          color: Colors.deepPurple.shade800,
+                          color: AppColors.primary,
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -515,7 +516,7 @@ class _SignupScreenState extends State<SignupScreen> {
                                     TextSpan(
                                       text: 'Terms & Conditions',
                                       style: TextStyle(
-                                        color: Colors.deepPurple.shade700,
+                                        color:  AppColors.primary,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
@@ -525,7 +526,7 @@ class _SignupScreenState extends State<SignupScreen> {
                                     TextSpan(
                                       text: 'Privacy Policy',
                                       style: TextStyle(
-                                        color: Colors.deepPurple.shade700,
+                                        color: AppColors.primary,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
@@ -542,7 +543,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       ElevatedButton(
                         onPressed: _submitForm,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.deepPurple,
+                          backgroundColor: AppColors.primary,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
@@ -591,7 +592,7 @@ class _SignupScreenState extends State<SignupScreen> {
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(vertical: 16),
-        side: BorderSide(color: Colors.deepPurple.shade300),
+        side: BorderSide(color: AppColors.primary),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -600,13 +601,13 @@ class _SignupScreenState extends State<SignupScreen> {
         children: [
           Icon(
             icon,
-            color: Colors.deepPurple,
+            color: AppColors.primary,
           ),
           const SizedBox(height: 8),
           Text(
             title,
             style: TextStyle(
-              color: Colors.deepPurple.shade700,
+              color:  AppColors.primary,
             ),
           ),
         ],
